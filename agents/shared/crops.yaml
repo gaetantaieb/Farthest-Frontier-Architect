@@ -1,0 +1,19 @@
+# Crop table for evaluate_rotation and the farming score.
+# The official guide names the crops and says how they behave in general (wheat drains fertility,
+# clover needs no harvest, nitrogen fixers restore fertility, four soil diseases); it gives no numbers.
+# Every value below is therefore an estimate (approximate: true) until replaced by game data.
+#   fertility_delta: change per year grown (0..1 scale)   weed_suppression: weeds removed per year
+#   disease: soil disease family the crop is exposed to   ideal_clay: preferred clay share (0..1)
+crops:
+  Wheat:     { group: grain,  fertility_delta: -0.10, weed_suppression: 0.00, disease: powdery_mildew, ideal_clay: 0.6, base_yield: 1.2, approximate: true }
+  Barley:    { group: grain,  fertility_delta: -0.07, weed_suppression: 0.02, disease: powdery_mildew, ideal_clay: 0.5, base_yield: 1.0, approximate: true }
+  Rye:       { group: grain,  fertility_delta: -0.06, weed_suppression: 0.05, disease: powdery_mildew, ideal_clay: 0.4, base_yield: 0.9, approximate: true }
+  Buckwheat: { group: grain,  fertility_delta: -0.03, weed_suppression: 0.15, ideal_clay: 0.3, base_yield: 0.8, approximate: true }
+  Flax:      { group: fibre,  fertility_delta: -0.06, weed_suppression: 0.00, ideal_clay: 0.5, base_yield: 0.7, approximate: true }
+  Beans:     { group: legume, fertility_delta: 0.06,  weed_suppression: 0.03, disease: bean_wilt, ideal_clay: 0.5, base_yield: 0.8, approximate: true }
+  Clover:    { group: legume, fertility_delta: 0.12,  weed_suppression: 0.20, ideal_clay: 0.5, base_yield: 0.0, needs_harvest: false, approximate: true }
+  Cabbage:   { group: brassica, fertility_delta: -0.08, weed_suppression: 0.02, disease: club_root, ideal_clay: 0.6, base_yield: 1.0, approximate: true }
+  Turnips:   { group: brassica, fertility_delta: -0.05, weed_suppression: 0.05, disease: club_root, ideal_clay: 0.4, base_yield: 0.9, approximate: true }
+  Carrots:   { group: root,   fertility_delta: -0.05, weed_suppression: 0.00, disease: aster_yellows, ideal_clay: 0.3, base_yield: 0.9, approximate: true }
+  Leeks:     { group: allium, fertility_delta: -0.05, weed_suppression: 0.00, disease: aster_yellows, ideal_clay: 0.5, base_yield: 0.8, approximate: true }
+  Greens:    { group: leafy,  fertility_delta: -0.04, weed_suppression: 0.02, disease: aster_yellows, ideal_clay: 0.5, base_yield: 0.7, approximate: true }

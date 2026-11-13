@@ -1,0 +1,5 @@
+# Profile "Defence first": overrides of agent.yaml (only the keys listed here change).
+objectives:
+  O5_defence: 2.0
+  O3_residential: 1.2
+  O1_farming: 0.8

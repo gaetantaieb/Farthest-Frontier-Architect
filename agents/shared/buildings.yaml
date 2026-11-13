@@ -1,0 +1,47 @@
+# Shared game knowledge used by the snapshot, the validator and the scorer.
+# Building names are the game's identifiers without spaces. Rules are tried in order; the first
+# match wins. Radii are in tiles and are approximate defaults: values read from the game data
+# (knowledge pack) replace them when the game map can read them.
+rules:
+  - { match: "TownCent(er|re)|TownHall", category: town_center }
+  - { match: "Gate", category: gate }
+  - { match: "Wall|Palisade", category: wall }
+  - { match: "Barrack|Tower|Guard|Archer|Militia|Garrison", category: defence, service: defence, service_radius: 15 }
+  - { match: "RootCellar|Storehouse|Storage|Stockpile|Granary|Warehouse|Barn|Cellar", category: storage }
+  - { match: "Farmhouse|FarmHouse|Orchard|Pasture|Apiary|Beekeep", category: farm, food: true }
+  - { match: "Market", category: service, service: market, service_radius: 25 }
+  - { match: "Well", category: service, service: well, service_radius: 18 }
+  - { match: "Healer|Physician|Herbalist|Hospital|Apothecary|Doctor", category: service, service: healer, service_radius: 25 }
+  - { match: "School|Academy|Library", category: service, service: school, service_radius: 25 }
+  - { match: "Chapel|Church|Cathedral|Shrine|Temple|Monastery", category: service, service: chapel, service_radius: 30 }
+  - { match: "Tavern|Theat(er|re)|Bathhouse|Inn|Pub|Arena", category: service, service: entertainment, service_radius: 25 }
+  - { match: "Trad(ing|er)|Merchant", category: service, service: trade, service_radius: 0 }
+  - { match: "Compost|Waste|Outhouse|Latrine|Nightsoil|Rat", category: service, service: sanitation, service_radius: 20, desirability: -2, desirability_radius: 6 }
+  - { match: "Hunt|Forag|Fish|Smoke|Bake|Windmill|Mill|Butcher|Dairy|Cheese|Brew", category: food, food: true }
+  - { match: "Splitter|Firewood", category: resource, firewood: true }
+  - { match: "Woodcut|Lumber|Logging|Sawmill", category: resource }
+  - { match: "Quarry", category: resource, fixed_resource: stone }
+  - { match: "Mine", category: resource, fixed_resource: ore, desirability: -3, desirability_radius: 8 }
+  - { match: "ClayPit|Clay", category: resource, fixed_resource: clay, desirability: -2, desirability_radius: 6 }
+  - { match: "SandPit|Sand", category: resource, fixed_resource: sand, desirability: -2, desirability_radius: 6 }
+  - { match: "Smith|Forge|Kiln|Brick|Tann|Tailor|Weav|Cobbl|Glass|Armo|Workshop|Carpent|Cooper|Potter|Mason|Smelt|Jewel", category: production, desirability: -1, desirability_radius: 5 }
+  - { match: "Decor|Garden|Statue|Fountain|Bench|Flower|Monument|Planter|Park", category: decoration, desirability: 2, desirability_radius: 6 }
+  - { match: "House|Home|Hovel|Cottage|Dwelling|Shelter|Manor|Shack", category: housing }
+
+# Used only when the game data cannot be read (footprints in tiles).
+default_specs:
+  House: { category: housing, tier: 1, w: 3, h: 3, build_days: 8, capacity: 4 }
+  Storehouse: { category: storage, tier: 1, w: 4, h: 4, build_days: 10 }
+  Well: { category: service, tier: 1, w: 2, h: 2, build_days: 5, service: well, service_radius: 18 }
+  Market: { category: service, tier: 1, w: 5, h: 5, build_days: 12, service: market, service_radius: 25 }
+
+# Estimates for metrics the game does not expose directly. Snapshot values derived from them are
+# flagged rates_estimated so neither Claude nor the player mistakes them for game numbers.
+assumptions:
+  food_per_villager_per_month: 1.0
+  food_per_worker_per_month: 2.5
+  firewood_item: Firewood
+  firewood_per_house_per_month: 2.0
+  firewood_per_worker_per_month: 6
+  food_items: [Berries, Roots, Greens, Mushrooms, Nuts, Meat, Fish, SmokedMeat, SmokedFish, Bread, Eggs, Cheese, Milk,
+               Beans, Cabbage, Carrots, Turnips, Leeks, Apples, Pies, Sausage, Preserves, Honey, Pumpkins]

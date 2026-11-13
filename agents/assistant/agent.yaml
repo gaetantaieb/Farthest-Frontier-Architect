@@ -1,0 +1,17 @@
+# Assistant agent — one report per click. Read at the start of every run.
+agent: assistant
+version: 0.1.0
+model:
+  id: most-capable
+  effort: high
+  max_output_tokens: 32000
+loop:
+  max_turns: 8
+  max_minutes: 4
+tools:
+  enabled: [query, submit_report]
+  descriptions: {}
+output:
+  schema: assistant_report_v1
+  rationale: short_line
+  language: en

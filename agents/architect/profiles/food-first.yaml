@@ -1,0 +1,6 @@
+# Profile "Food first": overrides of agent.yaml (only the keys listed here change).
+objectives:
+  O1_farming: 2.0
+  O2_logistics: 1.2
+  O4_missing_buildings: 1.0
+  O5_defence: 0.3

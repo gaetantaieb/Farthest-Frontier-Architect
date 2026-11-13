@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Game-independent logic (JSON/YAML, Claude client, agent loader, planner, validator,
+    scorer, road network, tool server, executor state machine).
+    It has no Unity dependency so it is unit-tested on plain .NET. The shipped mod compiles
+    these sources directly into FrontierArchitect.dll (one file to install, nothing to resolve
+    at runtime inside the game's Mono).
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>net472;net8.0</TargetFrameworks>
+    <AssemblyName>FrontierArchitect.Core</AssemblyName>
+    <RootNamespace>FrontierArchitect.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="FrontierArchitect.Tests" />
+  </ItemGroup>
+</Project>

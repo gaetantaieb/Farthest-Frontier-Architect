@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The MelonLoader mod. Builds without the game installed: MelonLoader and Unity are
+    referenced from NuGet as compile-time-only references, and every call into the game's
+    own code (Assembly-CSharp) goes through reflection driven by gamemap.json.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>FrontierArchitect</AssemblyName>
+    <RootNamespace>FrontierArchitect</RootNamespace>
+    <FaBuildInfoNamespace>FrontierArchitect</FaBuildInfoNamespace>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="LavaGang.MelonLoader" Version="0.6.6" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="UnityEngine.Modules" Version="2021.3.33" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <!-- Core sources are compiled into this assembly (single-DLL install). -->
+  <ItemGroup>
+    <Compile Include="..\FrontierArchitect.Core\**\*.cs" Exclude="..\FrontierArchitect.Core\obj\**;..\FrontierArchitect.Core\bin\**" LinkBase="Core" />
+  </ItemGroup>
+
+  <!-- Default agent files and game map ship inside the DLL and are synced to UserData on start. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\agents\**\*" LogicalName="defaults/agents/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\gamemap\gamemap.json" LogicalName="defaults/gamemap.json" />
+  </ItemGroup>
+</Project>

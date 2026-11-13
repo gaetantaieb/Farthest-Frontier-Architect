@@ -1,0 +1,69 @@
+name: Release
+
+# Publishes a GitHub release whenever the version in Directory.Build.props changes on main
+# (or on demand). Installed copies of the mod pick it up on their next game start: the updater
+# plugin reads the release's manifest.json, checks the SHA-256 of each file and installs them.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Directory.Build.props"
+      - "src/**"
+      - "agents/**"
+      - "gamemap/**"
+      - "CHANGELOG.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(grep -oPm1 '(?<=<Version>)[0-9][^<]*(?=</Version>)' Directory.Build.props)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION is already released; bump Version in Directory.Build.props to publish an update."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and test
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          dotnet build FrontierArchitect.sln -c Release --nologo
+          dotnet test tests/FrontierArchitect.Tests/FrontierArchitect.Tests.csproj -c Release --nologo --no-build
+
+      - name: Package
+        if: steps.version.outputs.exists == 'false'
+        run: tools/package.sh --skip-build
+
+      - name: Publish release
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PRE=""
+          if [[ "$VERSION" == *-* ]]; then PRE="--prerelease"; fi
+          gh release create "$TAG" \
+            dist/FrontierArchitect-$TAG.zip dist/FrontierArchitect.dll dist/FrontierArchitect.Updater.dll dist/manifest.json \
+            --target "$GITHUB_SHA" --title "Frontier Architect $TAG" --notes-file dist/notes.md $PRE

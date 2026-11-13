@@ -1,0 +1,11 @@
+bin/
+obj/
+artifacts/
+dist/
+*.user
+*.suo
+.vs/
+.idea/
+*.swp
+TestResults/
+GameLibs/

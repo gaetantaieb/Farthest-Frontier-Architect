@@ -1,0 +1,318 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using FrontierArchitect.Core.Data;
+using FrontierArchitect.Core.Layout;
+using FrontierArchitect.Core.Model;
+using FrontierArchitect.Core.Planning;
+using FrontierArchitect.Core.Roads;
+using FrontierArchitect.Core.Scoring;
+using FrontierArchitect.Core.Tools;
+using Xunit;
+
+namespace FrontierArchitect.Tests
+{
+    internal static class A
+    {
+        public static PlanAction Act(string id, string op, string target, JObject p = null, string obj = "O2") =>
+            new PlanAction { Id = id, Op = op, Target = target, Params = p ?? new JObject(), Rationale = "test", Objective = obj };
+
+        public static JObject At(int x, int z, int rot = 0) => new JObject().Set("x", x).Set("z", z).Set("rot", rot);
+
+        public static RunSettings Settings(int ambition = 3, string mode = "instant")
+        {
+            var s = new RunSettings { Ambition = ambition, Mode = mode };
+            return s;
+        }
+    }
+
+    public class DraftTests
+    {
+        [Fact]
+        public void PlacementRules()
+        {
+            var snap = Village.Build();
+            var d = new DraftLayout(snap);
+            var s = A.Settings();
+            Assert.True(d.Check(A.Act("a", Ops.Build, "House", A.At(40, 10)), s).Valid);
+            Assert.Contains("Water", string.Join(" ", d.Check(A.Act("a", Ops.Build, "House", A.At(3, 30)), s).Reasons));
+            Assert.Contains("overlaps", string.Join(" ", d.Check(A.Act("a", Ops.Build, "House", A.At(28, 28)), s).Reasons));
+            Assert.False(d.Check(A.Act("a", Ops.Build, "House", A.At(58, 30)), s).Valid); // off the map
+            Assert.False(d.Check(A.Act("a", Ops.Build, "NotUnlockedThing", A.At(40, 10)), s).Valid);
+
+            s.LockedIds.Add("House@20,20");
+            Assert.Contains("locked", string.Join(" ", d.Check(A.Act("a", Ops.Relocate, "House@20,20", A.At(40, 10)), s).Reasons));
+            Assert.Contains("ambition 5", string.Join(" ", d.Check(A.Act("a", Ops.Relocate, "TownCenter@27,27", A.At(40, 40)), s).Reasons));
+
+            s.AllowedOps.Remove(Ops.Flatten);
+            Assert.Contains("not allowed", string.Join(" ", d.Check(A.Act("a", Ops.Flatten, null, new JObject().Set("rect", new JArray { 10L, 10L, 3L, 3L })), s).Reasons));
+        }
+
+        [Fact]
+        public void BuildingOnARoadRemovesThatRoad()
+        {
+            var snap = Village.Build();
+            var d = new DraftLayout(snap);
+            var road = snap.RoadCells().First(c => d.OwnerAt(c) == null && c.X > 8 && c.X < 50 && c.Z > 8 && c.Z < 50);
+            var r = d.Apply(A.Act("a", Ops.Build, "Well", A.At(road.X, road.Z)), A.Settings());
+            if (r.Valid)
+            {
+                Assert.NotEmpty(r.RoadTilesRemoved);
+                Assert.DoesNotContain(road, d.Roads);
+            }
+        }
+
+        [Fact]
+        public void FieldsAreFiveToTwelveTiles()
+        {
+            var d = new DraftLayout(Village.Build());
+            var s = A.Settings();
+            Assert.False(d.Check(A.Act("f", Ops.FieldCreate, null, new JObject().Set("rect", new JArray { 40L, 10L, 4L, 8L })), s).Valid);
+            var ok = d.Check(A.Act("f", Ops.FieldCreate, null, new JObject().Set("rect", new JArray { 42L, 8L, 8L, 8L })
+                .Set("rotation", new JArray { new JArray { "Beans" }, new JArray { "Wheat" }, new JArray { "Clover" } })), s);
+            Assert.True(ok.Valid, string.Join(";", ok.Reasons));
+            var badCrop = d.Check(A.Act("f", Ops.FieldCreate, null, new JObject().Set("rect", new JArray { 42L, 8L, 8L, 8L })
+                .Set("rotation", new JArray { new JArray { "Tomatoes" }, new JArray { "Wheat" }, new JArray { "Clover" } })), s);
+            Assert.Contains("unknown crop", string.Join(" ", badCrop.Reasons));
+        }
+
+        [Fact]
+        public void RelocationLimitAndUndo()
+        {
+            var d = new DraftLayout(Village.Build());
+            var s = A.Settings(1);
+            s.AllowedOps = new HashSet<string> { Ops.Relocate };
+            s.MaxRelocations = 1;
+            Assert.True(d.Apply(A.Act("a", Ops.Relocate, "House@20,20", A.At(40, 10)), s).Valid);
+            Assert.Contains("relocation limit", string.Join(" ", d.Check(A.Act("b", Ops.Relocate, "House@36,20", A.At(45, 10)), s).Reasons));
+            Assert.Equal(40, d.Buildings["House@20,20"].X);
+            d.Undo(s);
+            Assert.Equal(20, d.Buildings["House@20,20"].X);
+            Assert.Equal(0, d.RelocationCount);
+        }
+
+        [Fact]
+        public void FixedSitesStayOnTheirResource()
+        {
+            var d = new DraftLayout(Village.Build());
+            var s = A.Settings();
+            Assert.Contains("clay", string.Join(" ", d.Check(A.Act("a", Ops.Build, "ClayPit", A.At(40, 30)), s).Reasons));
+            Assert.True(d.Check(A.Act("a", Ops.Build, "ClayPit", A.At(48, 10)), s).Valid);
+        }
+    }
+
+    public class RoadTests
+    {
+        [Fact]
+        public void NetworkConnectsEveryBuilding()
+        {
+            var snap = Village.Build(connected: false);
+            var d = new DraftLayout(snap);
+            var p = new RoadPlanner(d, A.Settings());
+            Assert.True(p.CheckConnectivity().Connectivity < 1);
+            var net = p.Design();
+            Assert.Empty(net.Unreachable);
+            Assert.Equal(1.0, net.Connectivity);
+            Assert.Equal(1.0, p.CheckConnectivity(net.Tiles).Connectivity);
+            Assert.True(net.Tiles.All(c => d.OwnerAt(c) == null && snap.Grid.IsLand(c)));
+        }
+
+        [Fact]
+        public void ExistingRoadsAreReused()
+        {
+            var snap = Village.Build(connected: true);
+            var net = new RoadPlanner(new DraftLayout(snap), A.Settings()).Design(null, false);
+            Assert.True(net.ReusedTiles > net.NewTiles);
+        }
+
+        [Fact]
+        public void RouteRoadAvoidsWaterAndBuildings()
+        {
+            var d = new DraftLayout(Village.Build(connected: false));
+            var path = new RoadPlanner(d, A.Settings()).RouteRoad(new Cell(8, 30), new Cell(50, 30));
+            Assert.NotNull(path);
+            Assert.All(path, c => Assert.True(d.Grid.IsLand(c) && d.OwnerAt(c) == null));
+        }
+    }
+
+    public class ScoringTests
+    {
+        [Fact]
+        public void ScoresAreDeterministicAndRewardCloserStorage()
+        {
+            var snap = Village.Build();
+            var s = A.Settings();
+            var before = new Scorer(s).Score(new DraftLayout(snap));
+            Assert.Equal(before.Weighted, new Scorer(s).Score(new DraftLayout(snap)).Weighted);
+            var d = new DraftLayout(snap);
+            Assert.True(d.Apply(A.Act("a", Ops.Relocate, "Storehouse@10,45", A.At(16, 16)), s).Valid);
+            var after = new Scorer(s).Score(d);
+            Assert.True(after.Objectives["O2"] > before.Objectives["O2"]);
+        }
+
+        [Fact]
+        public void LegumeRotationHoldsFertilityBetterThanWheatMonoculture()
+        {
+            var k = Village.Knowledge();
+            var f = new FieldInfo { Id = "f", Rect = new Rect(0, 0, 8, 8), Fertility = 0.7f };
+            var mono = RotationEvaluator.Evaluate(f, new List<List<string>> { new List<string> { "Wheat" }, new List<string> { "Wheat" }, new List<string> { "Wheat" } }, k);
+            var good = RotationEvaluator.Evaluate(f, new List<List<string>> { new List<string> { "Beans" }, new List<string> { "Wheat" }, new List<string> { "Clover" } }, k);
+            Assert.True(good.Years.Last().FertilityEnd > mono.Years.Last().FertilityEnd);
+            Assert.True(mono.Years.Last().DiseaseRisk > good.Years.Last().DiseaseRisk);
+            Assert.True(good.Score > mono.Score);
+        }
+    }
+
+    public class PlanValidatorTests
+    {
+        private static ArchitectPlan Plan(params Phase[] phases) => new ArchitectPlan { Summary = "t", Phases = phases.ToList() };
+
+        private static Phase P(int n, string name, params PlanAction[] actions) =>
+            new Phase { N = n, Name = name, Actions = actions.ToList(), SeasonWindow = new List<string> { "spring", "summer", "early_autumn" } };
+
+        [Fact]
+        public void ValidPlanPasses()
+        {
+            var snap = Village.Build();
+            var plan = Plan(
+                P(1, "Settings", A.Act("a1", Ops.SetRotation, "field@44,40", new JObject().Set("rotation", new JArray { new JArray { "Beans" }, new JArray { "Wheat" }, new JArray { "Clover" } }), "O1")),
+                P(2, "Storage", A.Act("a2", Ops.Relocate, "Storehouse@10,45", A.At(16, 16))));
+            var v = new PlanValidator(A.Settings()).Validate(plan, snap);
+            // the relocated storehouse needs a road to its new entrance
+            var extra = new RoadPlanner(v.FinalDraft, A.Settings()).Design(null, false);
+            if (v.Errors.Any(e => e.Contains("connect")))
+            {
+                var fresh = extra.Tiles.Where(c => !v.FinalDraft.Roads.Contains(c)).Select(c => (object)c.ToJson()).ToList();
+                plan.Phases[1].Actions.Add(A.Act("a3", Ops.RoadAdd, null, new JObject().Set("tiles", new JArray(fresh)), "O6"));
+                v = new PlanValidator(A.Settings()).Validate(plan, snap);
+            }
+            Assert.True(v.Ok, string.Join(" | ", v.Errors));
+            Assert.True(plan.ScoreAfter.Num("O1") >= plan.ScoreBefore.Num("O1"));
+        }
+
+        [Fact]
+        public void PhaseOrderIsEnforced()
+        {
+            var snap = Village.Build();
+            var plan = Plan(
+                P(1, "Houses", A.Act("a1", Ops.Relocate, "House@36,20", A.At(40, 10), "O3")),
+                P(2, "Storage", A.Act("a2", Ops.Relocate, "Storehouse@10,45", A.At(16, 16))));
+            var v = new PlanValidator(A.Settings()).Validate(plan, snap);
+            Assert.Contains(v.Errors, e => e.Contains("standard order"));
+        }
+
+        [Fact]
+        public void LastTierOneBuildingNeedsItsReplacementFirst()
+        {
+            var snap = Village.Build();
+            var plan = Plan(P(1, "Clean-up", A.Act("a1", Ops.Demolish, "Well@30,20", null, "O3")));
+            var v = new PlanValidator(A.Settings()).Validate(plan, snap);
+            Assert.Contains(v.Errors, e => e.Contains("replacement"));
+        }
+
+        [Fact]
+        public void OfflineCapLimitsTierOneMoves()
+        {
+            var snap = Village.Build();
+            var plan = Plan(P(1, "Houses",
+                A.Act("a1", Ops.Relocate, "House@20,20", A.At(40, 8), "O3"),
+                A.Act("a2", Ops.Relocate, "House@20,36", A.At(45, 8), "O3"),
+                A.Act("a3", Ops.Relocate, "House@36,20", A.At(50, 8), "O3")));
+            var v = new PlanValidator(A.Settings()).Validate(plan, snap);
+            Assert.Contains(v.Errors, e => e.Contains("offline"));
+        }
+
+        [Fact]
+        public void SeasonRulesForFieldsAndFrozenGround()
+        {
+            var snap = Village.Build();
+            var plan = Plan(new Phase
+            {
+                N = 1, Name = "Farming", SeasonWindow = new List<string> { "summer", "winter" },
+                Actions = new List<PlanAction> { A.Act("a1", Ops.FieldRemove, "field@44,40", new JObject().Set("after_harvest", true), "O1") }
+            });
+            var v = new PlanValidator(A.Settings()).Validate(plan, snap);
+            Assert.Contains(v.Errors, e => e.Contains("summer"));
+
+            var plan2 = Plan(new Phase { N = 1, Name = "Prepare", Actions = new List<PlanAction> { A.Act("a1", Ops.ClearArea, null, new JObject().Set("rect", new JArray { 40L, 8L, 4L, 4L }), "O2") } });
+            new PlanValidator(A.Settings()).Validate(plan2, snap);
+            Assert.DoesNotContain("winter", plan2.Phases[0].SeasonWindow); // filled by the mod
+        }
+
+        [Fact]
+        public void NativeModeChecksStocks()
+        {
+            var snap = Village.Build();
+            snap.Metrics.Obj("winter").Set("firewood", 10); // almost out
+            var plan = Plan(P(1, "Production", A.Act("a1", Ops.Relocate, "FirewoodSplitter@12,12", A.At(14, 20), "O2")));
+            plan.Phases[0].EstDays = 60;
+            var v = new PlanValidator(A.Settings(3, "native")).Validate(plan, snap);
+            Assert.Contains(v.Errors, e => e.Contains("firewood"));
+        }
+    }
+
+    public class ToolServerTests
+    {
+        private static ArchitectToolHost Host(VillageSnapshot snap = null) =>
+            new ArchitectToolHost(snap ?? Village.Build(), A.Settings(), null, null, 3, 3);
+
+        [Fact]
+        public void RegionFindSitesAndApply()
+        {
+            var h = Host();
+            var region = Json.ParseObject(h.Execute("get_region", new JObject().Set("x", 0L).Set("z", 25L).Set("w", 10L).Set("h", 2L).Set("layers", new JArray { "terrain" }), CancellationToken.None).Content);
+            Assert.Equal("#.~~~~....", region.Arr("terrain")[0]);
+
+            var sites = Json.ParseObject(h.Execute("find_sites", new JObject().Set("building_type", "Market").Set("near", "TownCenter@27,27").Set("limit", 3L), CancellationToken.None).Content);
+            var first = sites.Arr("sites").Objects().First();
+            var apply = h.Execute("apply_to_draft", new JObject().Set("action", new JObject().Set("op", "build").Set("target", "Market").Set("params", A.At(first.Int("x"), first.Int("z"), first.Int("rot")))), CancellationToken.None);
+            Assert.False(apply.IsError, apply.Content);
+            Assert.StartsWith("new:Market:", Json.ParseObject(apply.Content).Str("new_id"));
+            var undo = h.Execute("undo_draft", new JObject(), CancellationToken.None);
+            Assert.False(undo.IsError);
+        }
+
+        [Fact]
+        public void ToolInputsAreValidated()
+        {
+            var r = Host().Execute("get_region", new JObject().Set("x", "a"), CancellationToken.None);
+            Assert.True(r.IsError);
+        }
+
+        [Fact]
+        public void SubmitPlanRejectsThenAccepts()
+        {
+            var h = Host();
+            var bad = new JObject().Set("scenario", new JObject().Set("summary", "s")).Set("phases", new JArray
+            {
+                new JObject().Set("n", 1).Set("name", "x").Set("actions", new JArray { new JObject().Set("op", "build").Set("target", "House").Set("params", A.At(3, 30)) })
+            });
+            var r1 = h.Execute("submit_plan", bad, CancellationToken.None);
+            Assert.True(r1.IsError);
+            Assert.False(r1.Finished);
+
+            var good = new JObject().Set("scenario", new JObject().Set("summary", "s")).Set("phases", new JArray
+            {
+                new JObject().Set("n", 1).Set("name", "Settings").Set("actions", new JArray
+                {
+                    new JObject().Set("id", "a1").Set("op", "set_rotation").Set("target", "field@44,40").Set("objective", "O1").Set("rationale", "Beans restore fertility")
+                        .Set("params", new JObject().Set("rotation", new JArray { new JArray { "Beans" }, new JArray { "Wheat" }, new JArray { "Clover" } }))
+                })
+            });
+            var r2 = h.Execute("submit_plan", good, CancellationToken.None);
+            Assert.False(r2.IsError, r2.Content);
+            Assert.True(r2.Finished);
+            Assert.NotNull(h.AcceptedPlan);
+        }
+
+        [Fact]
+        public void RouteNetworkReturnsRoadActions()
+        {
+            var h = Host(Village.Build(connected: false));
+            var r = Json.ParseObject(h.Execute("route_network", new JObject().Set("apply", true), CancellationToken.None).Content);
+            Assert.Equal(1.0, r.Num("connectivity"));
+            Assert.Contains(r.Arr("actions").Objects(), a => a.Str("op") == "road_add");
+            Assert.Equal(1.0, new RoadPlanner(h.Draft, A.Settings()).CheckConnectivity().Connectivity);
+        }
+    }
+}

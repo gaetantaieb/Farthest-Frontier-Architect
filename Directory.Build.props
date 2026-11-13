@@ -1,0 +1,31 @@
+<Project>
+  <!--
+    Single source of truth for the mod version.
+    To ship an update: bump the Version below, merge to main. The release workflow builds,
+    tags v{version}, publishes the GitHub release, and every installed copy picks it
+    up on its next game launch (see docs/UPDATES.md).
+  -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <FaRepository>gaetantaieb/Farthest-Frontier-Architect</FaRepository>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- SYSLIB0014: HttpWebRequest is the transport that works inside Unity's Mono runtime. -->
+    <NoWarn>$(NoWarn);SYSLIB0014;CS1591;NU1701</NoWarn>
+  </PropertyGroup>
+
+  <!-- Generates BuildInfo.g.cs so MelonInfo and the updater see the same version string. -->
+  <Target Name="FaGenerateBuildInfo" BeforeTargets="CoreCompile" Condition="'$(FaBuildInfoNamespace)' != ''">
+    <PropertyGroup>
+      <FaBuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</FaBuildInfoFile>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(FaBuildInfoFile)" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="namespace $(FaBuildInfoNamespace) { internal static class BuildInfo { public const string Version = &quot;$(Version)&quot;%3B public const string Repository = &quot;$(FaRepository)&quot;%3B } }" />
+    <ItemGroup>
+      <Compile Include="$(FaBuildInfoFile)" />
+      <FileWrites Include="$(FaBuildInfoFile)" />
+    </ItemGroup>
+  </Target>
+</Project>
