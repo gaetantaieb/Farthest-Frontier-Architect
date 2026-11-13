@@ -1,6 +1,6 @@
 # Changelog
 
-Every version listed here is published by the release workflow when it reaches `main`.
+Every version listed here is published by the release workflow (`.github/workflows/release.yml`) when it reaches `main`.
 The in-game updater shows the section of the version it installs.
 
 ## [0.1.1] - 2026-11-13
