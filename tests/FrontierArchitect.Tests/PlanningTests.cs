@@ -316,3 +316,25 @@ namespace FrontierArchitect.Tests
         }
     }
 }
+
+namespace FrontierArchitect.Tests
+{
+    public class SnapshotShapeTests
+    {
+        [Fact]
+        public void WallPiecesAreSummarisedAndDoorSideDoesNotMatter()
+        {
+            var snap = Village.Build();
+            var k = snap.Knowledge;
+            for (int i = 0; i < 30; i++) snap.Buildings.Add(Village.B(k, "WallPalisade", 8 + i, 55));
+            var json = snap.ToJson();
+            Assert.DoesNotContain(json.Arr("buildings").Objects(), b => b.Str("type") == "WallPalisade");
+            Assert.Equal(30L, json.Obj("walls").Long("pieces"));
+
+            // rotate every building so its guessed door faces away from the road: still connected
+            foreach (var b in snap.Buildings) b.Rot = (b.Rot + 2) & 3;
+            var conn = new FrontierArchitect.Core.Roads.RoadPlanner(new FrontierArchitect.Core.Layout.DraftLayout(snap), A.Settings()).CheckConnectivity();
+            Assert.True(conn.Connectivity > 0.9, string.Join(",", conn.Unreachable));
+        }
+    }
+}

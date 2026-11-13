@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using FrontierArchitect.Core.Data;
 
 namespace FrontierArchitect.Core.Model
@@ -318,7 +319,20 @@ namespace FrontierArchitect.Core.Model
         /// <summary>The snapshot as sent to Claude (section 7 contract). The tile grid is not included.</summary>
         public JObject ToJson(bool includeRoads = true)
         {
-            var b = new JArray(); foreach (var x in Buildings) b.Add(x.ToJson());
+            // Wall pieces (hundreds of them) are summarised; gates and everything else are listed.
+            var b = new JArray();
+            var wallTypes = new Dictionary<string, int>();
+            int minX = int.MaxValue, minZ = int.MaxValue, maxX = int.MinValue, maxZ = int.MinValue;
+            foreach (var x in Buildings)
+            {
+                if (x.Category == "wall")
+                {
+                    int n; wallTypes.TryGetValue(x.Type, out n); wallTypes[x.Type] = n + 1;
+                    minX = Math.Min(minX, x.X); minZ = Math.Min(minZ, x.Z); maxX = Math.Max(maxX, x.X); maxZ = Math.Max(maxZ, x.Z);
+                    continue;
+                }
+                b.Add(x.ToJson());
+            }
             var f = new JArray(); foreach (var x in Fields) f.Add(x.ToJson());
             var r = new JArray(); if (includeRoads) foreach (var x in Roads) r.Add(x.ToJson());
             var res = new JArray(); foreach (var x in Resources) res.Add(x.ToJson());
@@ -331,6 +345,14 @@ namespace FrontierArchitect.Core.Model
                 .Set("buildings", b).Set("fields", f).Set("roads", r).Set("resources", res)
                 .Set("stock", stock)
                 .Set("unlocked_buildings", Unlocked.ToJArray());
+            if (wallTypes.Count > 0)
+            {
+                var wt = new JObject();
+                foreach (var kv in wallTypes.OrderBy(k => k.Key, StringComparer.Ordinal)) wt.Set(kv.Key, kv.Value);
+                o.Set("walls", new JObject().Set("pieces", wallTypes.Values.Sum()).Set("by_type", wt)
+                    .Set("extent", new JArray { (long)minX, (long)minZ, (long)(maxX - minX + 1), (long)(maxZ - minZ + 1) })
+                    .Set("note", "wall pieces occupy their tiles (see get_region occupancy); gates are listed in buildings"));
+            }
             if (Gaps.Count > 0) o.Set("data_gaps", Gaps.ToJArray());
             return o;
         }

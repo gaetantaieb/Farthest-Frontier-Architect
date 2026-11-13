@@ -3,6 +3,24 @@
 Every version listed here is published by the release workflow (`.github/workflows/release.yml`) when it reaches `main`.
 The in-game updater shows the section of the version it installs.
 
+## [0.2.0] - 2026-11-13
+
+Game reading rebuilt from a v1.1.2a (Mono) probe report.
+
+- Map: the game's own cell grid (384×384 cells of 5 units, detected from the fertility map), ground on the
+  `ClickCubes` layer, water on the `Water` layer and below the terrain manager's `seaLevel`.
+- Roads: read cell by cell from the `Roads` layer (none were read before, so every plan failed connectivity).
+- Footprints from each building's placement collider (`gridCollider`) and `BuildingData.gridSize`.
+- Workers per building counted from villagers' place of work; worker limit and paused state from
+  `_userDefinedMaxWorkers` / `_playerDesiresWorkEnabled`.
+- Stock from storages' `items` + `itemQtys` lists; year and sub-season from the time manager.
+- Building catalogue: costs (`buildingMaterials`), build work, max workers, UI category, tier from the name.
+- Wall pieces are summarised instead of listed one by one; categories and service radii fitted to the game's
+  building names and 5-unit cells.
+- Connectivity: a building counts as connected when any edge of its footprint touches the road network; a
+  village that starts below 95% connected must not get worse (warning instead of a rejected plan).
+- set_workers and set_paused have experimental recipes (test them in Settings > Diagnostics).
+
 ## [0.1.3] - 2026-11-13
 
 - Run logs: every Assistant and Architect run (and phase repair) is written to `UserData/FrontierArchitect/runs/` as one

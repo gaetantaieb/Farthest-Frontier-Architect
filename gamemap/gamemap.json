@@ -1,117 +1,478 @@
 {
   "schema": 1,
-  "_about": "How Frontier Architect reaches Farthest Frontier's internals (Mono build). Names were seeded from community mods and must be confirmed on the current game build (milestone M0): run Settings > Diagnostics > Run probe, then complete this file. Ops stay 'unmapped' (shown as Manual) until a recipe exists, and 'experimental' until tested in game. Execute stays off until mapped_game_version equals the running game version.",
+  "_about": "How Frontier Architect reaches Farthest Frontier's internals (Mono build). Names were seeded from community mods and must be confirmed on the current game build (milestone M0): run Settings > Diagnostics > Run probe, then complete this file. Ops stay 'unmapped' (shown as Manual) until a recipe exists, and 'experimental' until tested in game. Execute stays off until mapped_game_version equals the running game version. v1.1.2a names confirmed from a player's probe report (Nov 2026).",
   "mapped_game_version": "",
   "scene": "Frontier",
   "grid": {
-    "tile_size": 1.0,
+    "_help": "Farthest Frontier v1.1.x: no Unity Terrain; a fixed grid of 5-unit cells (384 per side, the size of the fertility map; 0 = detect), ground picked on the ClickCubes layer, water on Water, roads on Roads, sea level from the terrain manager. water_height overrides the sea level; ground_name/origin are fallbacks.",
+    "tile_size": 5.0,
+    "cells_per_side": 0,
+    "origin": null,
+    "ground_layer": "ClickCubes",
+    "water_layer": "Water",
+    "road_layer": "Roads",
+    "sea_level_member": "seaLevel",
     "max_cells_per_side": 512,
     "water_height": null,
-    "_ground_help": "Map source: Unity Terrain if present, else the largest solid collider (set ground_name to part of its name to force one; see probe report.json > ground), else the extent of the village.",
     "ground_name": ""
   },
   "types": {
-    "GameManager": ["GameManager"],
-    "ResourceManager": ["ResourceManager"],
-    "TimeManager": ["TimeManager"],
-    "WeatherManager": ["WeatherManager"],
-    "AgricultureManager": ["AgricultureManager"],
-    "CombatManager": ["CombatManager", "RaidManager"],
-    "RaidManager": ["RaidManager"],
-    "BuildManager": ["BuildManager"],
-    "CheatManager": ["CheatManager"],
-    "GlobalAssets": ["GlobalAssets"],
-    "Building": ["Building"],
-    "StorageBuilding": ["StorageBuilding"],
-    "BuildSite": ["BuildSiteResource"],
-    "Villager": ["Villager"],
-    "Field": ["FarmField", "Field", "CropField", "FarmPlot"],
-    "Road": ["Road", "RoadSegment", "RoadPiece", "RoadTile"],
-    "NaturalResource": ["NaturalResource", "ResourceNode", "HarvestableResource", "TreeResource"],
-    "SaveManager": ["SaveLoadManager", "SaveManager", "SaveGameManager"]
+    "GameManager": [
+      "GameManager"
+    ],
+    "ResourceManager": [
+      "ResourceManager"
+    ],
+    "TimeManager": [
+      "TimeManager"
+    ],
+    "WeatherManager": [
+      "WeatherManager"
+    ],
+    "AgricultureManager": [
+      "AgricultureManager"
+    ],
+    "CombatManager": [
+      "CombatManager",
+      "RaidManager"
+    ],
+    "RaidManager": [
+      "RaidManager"
+    ],
+    "BuildManager": [
+      "BuildManager"
+    ],
+    "CheatManager": [
+      "CheatManager"
+    ],
+    "GlobalAssets": [
+      "GlobalAssets"
+    ],
+    "Building": [
+      "Building"
+    ],
+    "StorageBuilding": [
+      "StorageBuilding"
+    ],
+    "BuildSite": [
+      "BuildSiteResource"
+    ],
+    "Villager": [
+      "Villager"
+    ],
+    "Field": [
+      "FarmField",
+      "Field",
+      "CropField",
+      "FarmPlot"
+    ],
+    "Road": [
+      "Road",
+      "RoadSegment",
+      "RoadPiece",
+      "RoadTile"
+    ],
+    "NaturalResource": [
+      "TreeResource",
+      "NaturalResource",
+      "ResourceNode"
+    ],
+    "SaveManager": [
+      "SaveLoadManager",
+      "SaveManager",
+      "SaveGameManager"
+    ],
+    "TerrainManager": [
+      "Terrain2Manager",
+      "TerrainManager"
+    ]
   },
   "members": {
-    "resource_manager.buildings": ["allBuildings", "buildings"],
-    "resource_manager.villagers": ["villagers", "allVillagers"],
-    "game.settlement_name": ["settlementName", "townName", "villageName"],
-    "game.town_tier": ["townTier", "currentTownTier", "townCenterTier"],
-    "time.year": ["year", "currentYear", "Year"],
-    "time.season": ["season", "currentSeason", "Season"],
-    "time.month": ["month", "currentMonth", "Month"],
-    "time.day": ["day", "currentDay", "dayOfYear", "Day"],
-    "time.season_progress": ["seasonProgress", "seasonPercent", "seasonProgress01"],
-    "weather.frozen": ["isGroundFrozen", "groundFrozen", "isFreezing"],
-    "raid.active": ["isRaidActive", "raidInProgress", "raidActive"],
-    "agriculture.fertility": ["cachedFertilityData", "fertilityData", "fertilityMap"],
-    "global.building_data": ["buildingSetupData.buildingData"],
-    "building_data.identifier": ["identifier"],
-    "building_data.tier": ["requiredTownTier", "townTierRequired", "tier", "unlockTier"],
-    "building_data.cost": ["constructionCost", "buildCost", "cost", "costs"],
-    "building_data.build_time": ["buildTimeDays", "constructionDays", "buildTime"],
-    "building_data.prefab_entries": ["prefabEntries"],
-    "building.type": ["buildingDataIdentifier", "identifier", "buildingData.identifier", "data.identifier"],
-    "building.tier": ["tier", "buildingTier", "upgradeLevel", "level"],
-    "building.workers_assigned": ["workers.Count", "assignedWorkers.Count", "employees.Count", "workerCount"],
-    "building.workers_max": ["maxWorkers", "maxWorkerCount", "workerCapacity", "maxEmployees"],
-    "building.work_radius": ["workRadius", "circleRadius", "foragingRadius", "huntingRadius", "gatherRadius"],
-    "building.work_center": ["workCircleCenter", "circleCenter", "workAreaCenter"],
-    "building.service_radius": ["serviceRadius", "influenceRadius", "coverageRadius", "effectRadius"],
-    "building.paused": ["isPaused", "paused", "workPaused"],
-    "building.under_construction": ["isUnderConstruction", "underConstruction", "isBuildSite"],
-    "building.residents": ["residents.Count", "occupants.Count", "inhabitants.Count"],
-    "building.capacity": ["residentCapacity", "maxResidents", "housingCapacity", "capacity"],
-    "building.storage_items": ["itemDict", "storage.itemDict", "inventory.itemDict", "items"],
-    "building.storage_capacity": ["storageItemCountCapacity", "maxCapacity", "capacity"],
-    "villager.home": ["home", "residence", "house"],
-    "villager.profession": ["profession", "job", "currentJob", "workplace"],
-    "villager.age": ["CalculateAgeInYears()", "age", "ageInYears"],
-    "field.fertility": ["fertility", "averageFertility", "soilFertility"],
-    "field.weeds": ["weeds", "weedLevel", "weediness"],
-    "field.rocks": ["rocks", "rockiness", "rockLevel"],
-    "field.rotation": ["cropRotation", "rotation", "rotationCrops"],
-    "field.current_year": ["rotationYear", "currentRotationIndex", "currentYear"],
-    "field.crop_in_ground": ["currentCrop", "plantedCrop", "cropInGround"],
-    "field.diseases": ["diseases", "soilDiseases", "presentDiseases"],
-    "road.points": ["points", "tiles", "pathPoints", "nodes"],
-    "resource.type": ["resourceType", "itemType", "type"],
-    "resource.remaining": ["remaining", "amount", "quantity", "resourcesRemaining"]
+    "resource_manager.buildings": [
+      "allBuildings",
+      "buildings"
+    ],
+    "resource_manager.villagers": [
+      "villagers",
+      "allVillagers"
+    ],
+    "game.settlement_name": [
+      "settlementName",
+      "townName",
+      "villageName"
+    ],
+    "game.town_tier": [
+      "townTier",
+      "currentTownTier",
+      "townCenterTier"
+    ],
+    "time.year": [
+      "year",
+      "currentYear",
+      "Year"
+    ],
+    "time.season": [
+      "_season",
+      "season",
+      "currentSeason"
+    ],
+    "time.month": [
+      "month",
+      "currentMonth",
+      "Month"
+    ],
+    "time.day": [
+      "day",
+      "currentDay",
+      "dayOfYear",
+      "Day"
+    ],
+    "time.season_progress": [
+      "seasonProgress",
+      "seasonPercent",
+      "seasonProgress01"
+    ],
+    "weather.frozen": [
+      "isGroundFrozen",
+      "groundFrozen",
+      "isFreezing"
+    ],
+    "raid.active": [
+      "isRaidActive",
+      "raidInProgress",
+      "raidActive"
+    ],
+    "agriculture.fertility": [
+      "cachedFertilityData",
+      "fertilityData",
+      "fertilityMap"
+    ],
+    "global.building_data": [
+      "buildingSetupData.buildingData"
+    ],
+    "building_data.identifier": [
+      "identifier"
+    ],
+    "building_data.tier": [
+      "requiredTownTier",
+      "townTierRequired",
+      "tier",
+      "unlockTier"
+    ],
+    "building_data.cost": [
+      "buildingMaterials",
+      "constructionCost",
+      "buildCost",
+      "cost"
+    ],
+    "building_data.build_time": [
+      "workRequiredToConstruct",
+      "buildTimeDays",
+      "buildTime"
+    ],
+    "building_data.prefab_entries": [
+      "prefabEntries"
+    ],
+    "building.type": [
+      "buildingDataIdentifier",
+      "identifier",
+      "buildingData.identifier",
+      "data.identifier"
+    ],
+    "building.tier": [
+      "tier",
+      "buildingTier",
+      "upgradeLevel",
+      "level"
+    ],
+    "building.workers_assigned": [
+      "workers.Count",
+      "assignedWorkers.Count",
+      "employees.Count",
+      "workerCount"
+    ],
+    "building.workers_max": [
+      "maxWorkers",
+      "maxWorkerCount",
+      "workerCapacity",
+      "maxEmployees"
+    ],
+    "building.work_radius": [
+      "workRadius",
+      "circleRadius",
+      "foragingRadius",
+      "huntingRadius",
+      "gatherRadius"
+    ],
+    "building.work_center": [
+      "workCircleCenter",
+      "circleCenter",
+      "workAreaCenter"
+    ],
+    "building.service_radius": [
+      "serviceRadius",
+      "influenceRadius",
+      "coverageRadius",
+      "effectRadius"
+    ],
+    "building.paused": [
+      "isPaused",
+      "paused",
+      "workPaused"
+    ],
+    "building.under_construction": [
+      "isUnderConstruction",
+      "underConstruction",
+      "isBuildSite"
+    ],
+    "building.residents": [
+      "residents.Count",
+      "occupants.Count",
+      "inhabitants.Count"
+    ],
+    "building.capacity": [
+      "residentCapacity",
+      "maxResidents",
+      "housingCapacity",
+      "capacity"
+    ],
+    "building.storage_items": [
+      "itemDict",
+      "storage.itemDict",
+      "inventory.itemDict",
+      "items"
+    ],
+    "building.storage_capacity": [
+      "storageItemCountCapacity",
+      "maxCapacity",
+      "capacity"
+    ],
+    "villager.home": [
+      "_homeResidence",
+      "residence",
+      "home"
+    ],
+    "villager.profession": [
+      "occupation.occupation",
+      "occupation.type",
+      "occupation.currentOccupation",
+      "occupation",
+      "profession"
+    ],
+    "villager.age": [
+      "CalculateAgeInYears()",
+      "age",
+      "ageInYears"
+    ],
+    "field.fertility": [
+      "fertility",
+      "averageFertility",
+      "soilFertility"
+    ],
+    "field.weeds": [
+      "weeds",
+      "weedLevel",
+      "weediness"
+    ],
+    "field.rocks": [
+      "rocks",
+      "rockiness",
+      "rockLevel"
+    ],
+    "field.rotation": [
+      "cropRotation",
+      "rotation",
+      "rotationCrops"
+    ],
+    "field.current_year": [
+      "rotationYear",
+      "currentRotationIndex",
+      "currentYear"
+    ],
+    "field.crop_in_ground": [
+      "currentCrop",
+      "plantedCrop",
+      "cropInGround"
+    ],
+    "field.diseases": [
+      "diseases",
+      "soilDiseases",
+      "presentDiseases"
+    ],
+    "road.points": [
+      "points",
+      "tiles",
+      "pathPoints",
+      "nodes"
+    ],
+    "resource.type": [
+      "buildingDataIdentifier",
+      "_resourceDataRecordName",
+      "resourceType"
+    ],
+    "resource.remaining": [
+      "remaining",
+      "amount",
+      "quantity",
+      "resourcesRemaining"
+    ],
+    "time.subseason": [
+      "_subSeason",
+      "subSeason"
+    ],
+    "time.label": [
+      "_realWorldSeasonString",
+      "realWorldSeasonString"
+    ],
+    "building_data.grid_size": [
+      "gridSize"
+    ],
+    "building_data.category": [
+      "uiBuildCategory",
+      "buildGroup"
+    ],
+    "building_data.max_workers": [
+      "maxWorkers"
+    ],
+    "building.workers_desired": [
+      "_userDefinedMaxWorkers",
+      "userDefinedMaxWorkers"
+    ],
+    "building.work_enabled": [
+      "_playerDesiresWorkEnabled",
+      "playerDesiresWorkEnabled",
+      "_workEnabled"
+    ],
+    "villager.workplace": [
+      "_placeOfWork",
+      "placeOfWork",
+      "workplace"
+    ]
   },
   "ops": {
     "set_workers": {
-      "status": "unmapped",
-      "note": "Candidate: a Building method that sets the desired worker count (the game UI's +/- buttons). Replace the method name after the probe.",
-      "native": [{ "call": "building.SetDesiredWorkerCount", "args": ["$count"] }],
+      "status": "experimental",
+      "note": "v1.1.2a: Building._userDefinedMaxWorkers is the player's worker limit (the UI +/-). Setting the field may not refresh the game's job assignment; test with Settings > Diagnostics > set_workers.",
+      "native": [
+        {
+          "set": "building._userDefinedMaxWorkers",
+          "value": "$count"
+        }
+      ],
       "instant": "same",
-      "verify": { "member": "building.desiredWorkerCount", "equals": "$count", "timeout_seconds": 30 }
+      "verify": {
+        "member": "building._userDefinedMaxWorkers",
+        "equals": "$count",
+        "timeout_seconds": 30
+      }
     },
     "set_paused": {
-      "status": "unmapped",
-      "native": [{ "set": "building.isPaused", "value": "$paused" }],
+      "status": "experimental",
+      "note": "v1.1.2a: Building._playerDesiresWorkEnabled is the player's work toggle (false = paused).",
+      "native": [
+        {
+          "set": "building._playerDesiresWorkEnabled",
+          "value": "$work_enabled"
+        }
+      ],
       "instant": "same",
-      "verify": { "member": "building.isPaused", "equals": "$paused", "timeout_seconds": 10 }
+      "verify": {
+        "member": "building._playerDesiresWorkEnabled",
+        "equals": "$work_enabled",
+        "timeout_seconds": 10
+      }
     },
-    "set_production_limit": { "status": "unmapped" },
-    "set_profession_target": { "status": "unmapped" },
-    "set_rotation": { "status": "unmapped" },
-    "set_work_circle": { "status": "unmapped" },
+    "set_production_limit": {
+      "status": "unmapped"
+    },
+    "set_profession_target": {
+      "status": "unmapped"
+    },
+    "set_rotation": {
+      "status": "unmapped"
+    },
+    "set_work_circle": {
+      "status": "unmapped"
+    },
     "build": {
       "status": "unmapped",
       "note": "Community mods call BuildManager.Construct(...) returning a GameObject; confirm its parameters with the probe.",
-      "native": [{ "call": "BuildManager.Construct", "args": ["$prefab", "$world_pos", "$rotation"] }],
-      "verify": { "builtin": "building_at_target" }
+      "native": [
+        {
+          "call": "BuildManager.Construct",
+          "args": [
+            "$prefab",
+            "$world_pos",
+            "$rotation"
+          ]
+        }
+      ],
+      "verify": {
+        "builtin": "building_at_target"
+      }
     },
-    "relocate": { "status": "unmapped", "verify": { "builtin": "building_at_target" } },
-    "demolish": { "status": "unmapped", "verify": { "builtin": "building_gone" } },
-    "clear_area": { "status": "unmapped" },
-    "flatten": { "status": "unmapped" },
-    "road_add": { "status": "unmapped" },
-    "road_remove": { "status": "unmapped" },
-    "field_create": { "status": "unmapped", "verify": { "builtin": "field_present" } },
-    "field_resize": { "status": "unmapped" },
-    "field_remove": { "status": "unmapped", "verify": { "builtin": "field_gone" } }
+    "relocate": {
+      "status": "unmapped",
+      "verify": {
+        "builtin": "building_at_target"
+      }
+    },
+    "demolish": {
+      "status": "unmapped",
+      "verify": {
+        "builtin": "building_gone"
+      }
+    },
+    "clear_area": {
+      "status": "unmapped"
+    },
+    "flatten": {
+      "status": "unmapped"
+    },
+    "road_add": {
+      "status": "unmapped"
+    },
+    "road_remove": {
+      "status": "unmapped"
+    },
+    "field_create": {
+      "status": "unmapped",
+      "verify": {
+        "builtin": "field_present"
+      }
+    },
+    "field_resize": {
+      "status": "unmapped"
+    },
+    "field_remove": {
+      "status": "unmapped",
+      "verify": {
+        "builtin": "field_gone"
+      }
+    }
   },
   "procedures": {
-    "save": { "status": "unmapped", "steps": [{ "call": "SaveManager.SaveGame", "args": ["$name"] }] },
-    "load": { "status": "unmapped", "steps": [{ "call": "SaveManager.LoadGame", "args": ["$name"] }] }
+    "save": {
+      "status": "unmapped",
+      "steps": [
+        {
+          "call": "SaveManager.SaveGame",
+          "args": [
+            "$name"
+          ]
+        }
+      ]
+    },
+    "load": {
+      "status": "unmapped",
+      "steps": [
+        {
+          "call": "SaveManager.LoadGame",
+          "args": [
+            "$name"
+          ]
+        }
+      ]
+    }
   }
 }

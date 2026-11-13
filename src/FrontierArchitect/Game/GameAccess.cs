@@ -130,35 +130,67 @@ namespace FrontierArchitect.Game
 
         // ---------------------------------------------------------------- stock
 
+        /// <summary>Readable name of a game item object (Item, ItemID enum, record…).</summary>
+        public static string ItemName(object item)
+        {
+            if (item == null) return null;
+            if (item is string str) return str;
+            if (item is Enum) return item.ToString();
+            foreach (var m in new[] { "identifier", "itemID", "id", "itemName", "displayName", "name" })
+            {
+                var v = Reflect.Get(item, m);
+                if (v == null) continue;
+                string t = v is UnityEngine.Object uo ? uo.name : Reflect.Text(v);
+                if (!string.IsNullOrEmpty(t) && t != item.GetType().Name) return t;
+            }
+            var s = item is UnityEngine.Object o ? o.name : item.ToString();
+            return string.IsNullOrEmpty(s) ? null : s;
+        }
+
+        private static void Add(Dictionary<string, double> total, string key, double n)
+        {
+            if (string.IsNullOrEmpty(key) || double.IsNaN(n)) return;
+            double cur; total.TryGetValue(key, out cur);
+            total[key] = cur + n;
+        }
+
+        /// <summary>Items held by one storage: an items/itemQtys pair of lists (Farthest Frontier), a dictionary, or a list of stacks.</summary>
+        public void ReadItems(object owner, Dictionary<string, double> total)
+        {
+            var names = Reflect.Items(Reflect.Get(owner, "items"));
+            var qtys = Reflect.Items(Reflect.Get(owner, "itemQtys"));
+            if (names.Count > 0 && names.Count == qtys.Count)
+            {
+                for (int i = 0; i < names.Count; i++) Add(total, ItemName(names[i]), Reflect.Num(qtys[i], 0));
+                return;
+            }
+            var items = Member(owner, "building.storage_items");
+            if (items is IDictionary dict)
+            {
+                foreach (DictionaryEntry e in dict)
+                {
+                    double n = Reflect.Num(e.Value, double.NaN);
+                    if (double.IsNaN(n)) n = Reflect.Num(Reflect.Get(e.Value, "count") ?? Reflect.Get(e.Value, "amount") ?? Reflect.Get(e.Value, "Count"), 0);
+                    Add(total, ItemName(e.Key), n);
+                }
+                return;
+            }
+            foreach (var it in Reflect.Items(items))
+            {
+                var nameObj = Reflect.Get(it, "item") ?? Reflect.Get(it, "itemID") ?? Reflect.Get(it, "id");
+                double n = Reflect.Num(Reflect.Get(it, "count") ?? Reflect.Get(it, "amount") ?? Reflect.Get(it, "quantity") ?? Reflect.Get(it, "qty"), double.NaN);
+                if (nameObj != null && !double.IsNaN(n)) Add(total, ItemName(nameObj), n);
+            }
+        }
+
         public Dictionary<string, double> Stock()
         {
             var total = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             foreach (var b in ObjectsOf("StorageBuilding"))
             {
-                var items = Member(b, "building.storage_items");
-                if (items is IDictionary dict)
-                {
-                    foreach (DictionaryEntry e in dict)
-                    {
-                        string key = Reflect.Text(e.Key);
-                        double n = Reflect.Num(e.Value, double.NaN);
-                        if (double.IsNaN(n)) n = Reflect.Num(Reflect.Get(e.Value, "count") ?? Reflect.Get(e.Value, "amount") ?? Reflect.Get(e.Value, "Count"), 0);
-                        if (key == null) continue;
-                        double cur; total.TryGetValue(key, out cur);
-                        total[key] = cur + n;
-                    }
-                }
-                else
-                {
-                    foreach (var it in Reflect.Items(items))
-                    {
-                        string key = Reflect.Text(Reflect.Get(it, "item") ?? Reflect.Get(it, "itemID") ?? Reflect.Get(it, "id"));
-                        double n = Reflect.Num(Reflect.Get(it, "count") ?? Reflect.Get(it, "amount") ?? Reflect.Get(it, "quantity"), 0);
-                        if (key == null) continue;
-                        double cur; total.TryGetValue(key, out cur);
-                        total[key] = cur + n;
-                    }
-                }
+                ReadItems(b, total);
+                var storage = Reflect.Get(b, "storage");
+                if (storage != null && total.Count == 0) ReadItems(storage, total);
             }
             if (total.Count == 0) Gaps.Add("stock not readable (members.building.storage_items)");
             return total;
@@ -170,7 +202,11 @@ namespace FrontierArchitect.Game
         {
             var tm = Singleton("TimeManager");
             if (tm == null) { Gaps.Add("time manager not found"); return; }
-            meta.Year = (int)Number(tm, "time.year", 1);
+            double yr = Number(tm, "time.year", double.NaN);
+            meta.Year = double.IsNaN(yr) || yr < 1 ? 1 : (int)yr;
+            string label = Text(tm, "time.label") ?? "";
+            var ym = System.Text.RegularExpressions.Regex.Match(label, @"Year\s+(\d+)");
+            if (ym.Success) meta.Year = int.Parse(ym.Groups[1].Value, CultureInfo.InvariantCulture);
             meta.Day = (int)Number(tm, "time.day", 0);
             meta.Month = (int)Number(tm, "time.month", 0);
             string season = Text(tm, "time.season");
@@ -178,6 +214,8 @@ namespace FrontierArchitect.Game
                 season = meta.Month <= 3 ? "spring" : meta.Month <= 6 ? "summer" : meta.Month <= 9 ? "autumn" : "winter";
             meta.Season = NormaliseSeason(season);
             double prog = Number(tm, "time.season_progress", double.NaN);
+            string sub = (Text(tm, "time.subseason") ?? "").ToLowerInvariant();
+            if (double.IsNaN(prog) && sub.Length > 0) prog = sub.Contains("early") ? 0.17 : sub.Contains("late") ? 0.83 : 0.5;
             if (double.IsNaN(prog) && meta.Month > 0) prog = ((meta.Month - 1) % 3) / 3.0 + 0.15;
             meta.SeasonProgress = double.IsNaN(prog) ? 0.5f : (float)Math.Max(0, Math.Min(1, prog > 1 ? prog / 100.0 : prog));
             var weather = Singleton("WeatherManager");

@@ -141,7 +141,7 @@ namespace FrontierArchitect.Game
             v["rotation"] = Quaternion.Euler(0, a.Rot * 90, 0);
             if (a.Params.ContainsKey("count")) v["count"] = a.Params.Int("count");
             if (a.Params.ContainsKey("limit")) v["limit"] = a.Params.Int("limit");
-            if (a.Params.ContainsKey("paused")) v["paused"] = a.Params.Bool("paused");
+            if (a.Params.ContainsKey("paused")) { v["paused"] = a.Params.Bool("paused"); v["work_enabled"] = !a.Params.Bool("paused"); }
 
             switch (a.Op)
             {

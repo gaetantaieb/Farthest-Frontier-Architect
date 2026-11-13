@@ -179,14 +179,23 @@ namespace FrontierArchitect.Core.Planning
 
                 // ---- connectivity after the phase
                 var conn = new RoadPlanner(draft, _s).CheckConnectivity();
-                if (conn.Connectivity + 1e-9 < Math.Min(1.0, startConnectivity))
+                if (conn.Connectivity + 0.02 < Math.Min(1.0, startConnectivity))
                     v.Errors.Add("after phase " + p.N + " road connectivity drops to " + Math.Round(conn.Connectivity * 100) + "% (" +
                                  string.Join(", ", conn.Unreachable.Take(6)) + (conn.Unreachable.Count > 6 ? ", …" : "") + ")");
                 v.FinalConnectivity = conn.Connectivity;
             }
 
-            if (v.FinalConnectivity < 0.999)
+            // 100% connectivity is required; a village that starts below 95% (roads partly unread, or
+            // genuinely disconnected) must at least not get worse, and is told what is missing.
+            if (startConnectivity >= 0.95 && v.FinalConnectivity < 0.999)
                 v.Errors.Add("the final layout must connect 100% of buildings by road (now " + Math.Round(v.FinalConnectivity * 100) + "%); call route_network and add its road_add actions");
+            else if (startConnectivity < 0.95)
+            {
+                if (v.FinalConnectivity + 1e-9 < startConnectivity)
+                    v.Errors.Add("the plan lowers road connectivity from " + Math.Round(startConnectivity * 100) + "% to " + Math.Round(v.FinalConnectivity * 100) + "%");
+                else if (v.FinalConnectivity < 0.999)
+                    v.Warnings.Add("road connectivity is " + Math.Round(v.FinalConnectivity * 100) + "% after the plan (was " + Math.Round(startConnectivity * 100) + "%); route_network can close the gap");
+            }
 
             // ---- Native mode: stocks through the plan
             if (string.Equals(_s.Mode, "native", StringComparison.OrdinalIgnoreCase))

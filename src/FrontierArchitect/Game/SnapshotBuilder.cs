@@ -39,6 +39,7 @@ namespace FrontierArchitect.Game
             snap.Knowledge = Knowledge();
             snap.Grid = BuildGrid();
             var components = _g.Buildings();
+            CountWorkers();
             foreach (var c in components)
             {
                 try
@@ -103,19 +104,38 @@ namespace FrontierArchitect.Game
                 if (!double.IsNaN(tier)) spec.Tier = Math.Max(1, (int)tier);
                 foreach (var c in Reflect.Items(_g.Member(bd, "building_data.cost")))
                 {
-                    string item = Reflect.Text(Reflect.Get(c, "item") ?? Reflect.Get(c, "itemID") ?? Reflect.Get(c, "itemData.identifier"));
-                    double n = Reflect.Num(Reflect.Get(c, "count") ?? Reflect.Get(c, "amount") ?? Reflect.Get(c, "quantity"), 0);
+                    string item = GameAccess.ItemName(Reflect.Get(c, "item") ?? Reflect.Get(c, "itemID") ?? Reflect.Get(c, "itemData") ?? Reflect.Get(c, "key"));
+                    double n = Reflect.Num(Reflect.Get(c, "count") ?? Reflect.Get(c, "amount") ?? Reflect.Get(c, "quantity") ?? Reflect.Get(c, "qty") ?? Reflect.Get(c, "value"), 0);
                     if (item != null && n > 0) spec.Cost[item] = n;
                 }
                 double days = _g.Number(bd, "building_data.build_time", double.NaN);
                 if (!double.IsNaN(days) && days > 0) spec.BuildDays = days;
+                var gs = _g.Member(bd, "building_data.grid_size");
+                bool sized = false;
+                if (gs is Vector2 v2 && v2.x > 0 && v2.y > 0)
+                {
+                    // gridSize is in game cells; the mod grid uses the same cells when tile_size equals the game cell size
+                    float scale = Ground.CellSize / tile;
+                    spec.W = Math.Max(1, Mathf.RoundToInt(v2.x * scale));
+                    spec.H = Math.Max(1, Mathf.RoundToInt(v2.y * scale));
+                    sized = true;
+                }
+                string cat = Reflect.Text(_g.Member(bd, "building_data.category"));
+                if (!string.IsNullOrEmpty(cat)) spec.Raw.Set("ui_category", cat);
+                double maxW = _g.Number(bd, "building_data.max_workers", double.NaN);
+                if (!double.IsNaN(maxW)) spec.MaxWorkers = (int)maxW;
+                var tierMatch = System.Text.RegularExpressions.Regex.Match(id, "_?[Tt]ier_?(\\d)");
+                if (double.IsNaN(tier) && tierMatch.Success) spec.Tier = int.Parse(tierMatch.Groups[1].Value);
                 var prefab = Reflect.Get(Reflect.Items(_g.Member(bd, "building_data.prefab_entries")).FirstOrDefault(), "prefab") as GameObject;
                 if (prefab != null)
                 {
                     var comp = prefab.GetComponent(_g.Map.ResolveType("Building") ?? typeof(Transform)) as Component ?? prefab.transform;
                     var bounds = GameAccess.WorldBounds(comp);
-                    spec.W = Math.Max(1, Mathf.RoundToInt(bounds.size.x / tile));
-                    spec.H = Math.Max(1, Mathf.RoundToInt(bounds.size.z / tile));
+                    if (!sized)
+                    {
+                        spec.W = Math.Max(1, Mathf.RoundToInt(bounds.size.x / tile));
+                        spec.H = Math.Max(1, Mathf.RoundToInt(bounds.size.z / tile));
+                    }
                     double wr = _g.Number(comp, "building.work_radius", double.NaN);
                     if (!double.IsNaN(wr) && wr > 0) spec.WorkRadius = (float)(wr / tile);
                     double sr = _g.Number(comp, "building.service_radius", double.NaN);
@@ -167,6 +187,7 @@ namespace FrontierArchitect.Game
 
         public void InvalidateTerrain() { _terrainCache = null; Ground.Reset(); }
 
+
         private TileGrid BuildGridFresh()
         {
             Bounds mb;
@@ -186,9 +207,9 @@ namespace FrontierArchitect.Game
                 {
                     int i = grid.Idx(x, z);
                     float wx = grid.OriginX + (x + 0.5f) * tile, wz = grid.OriginZ + (z + 0.5f) * tile;
-                    float height; Vector3 normal; bool water;
+                    float height; Vector3 normal; bool water, road;
                     bool edge = x == 0 || z == 0 || x == w - 1 || z == h - 1;
-                    if (!Ground.Probe(wx, wz, _g.Map.WaterHeight, out height, out normal, out water))
+                    if (!Ground.Probe(wx, wz, _g.Map.WaterHeight, out height, out normal, out water, out road))
                     {
                         misses++;
                         grid.Terrain[i] = Core.Model.Terrain.Edge;
@@ -241,7 +262,9 @@ namespace FrontierArchitect.Game
         private BuildingInfo ToBuilding(Component c, TileGrid grid, KnowledgePack k)
         {
             string type = _g.BuildingType(c);
-            var bounds = GameAccess.WorldBounds(c);
+            // the game's placement footprint collider ("gridCollider") is the exact footprint
+            var gridCol = Reflect.Get(c, "gridCollider") as Collider;
+            var bounds = gridCol != null ? gridCol.bounds : GameAccess.WorldBounds(c);
             var min = grid.WorldToCell(bounds.min.x + 0.01f, bounds.min.z + 0.01f);
             var max = grid.WorldToCell(bounds.max.x - 0.01f, bounds.max.z - 0.01f);
             int rw = Math.Max(1, max.X - min.X + 1), rh = Math.Max(1, max.Z - min.Z + 1);
@@ -255,7 +278,8 @@ namespace FrontierArchitect.Game
                 Handle = c,
             };
             b.Id = GameAccess.BuildingId(type, b.X, b.Z);
-            b.WorkersAssigned = (int)_g.Number(c, "building.workers_assigned", 0);
+            int counted;
+            b.WorkersAssigned = _workersByBuilding.TryGetValue(c, out counted) ? counted : (int)_g.Number(c, "building.workers_assigned", 0);
             b.WorkersMax = (int)_g.Number(c, "building.workers_max", 0);
             double tier = _g.Number(c, "building.tier", double.NaN);
             b.Tier = double.IsNaN(tier) ? 0 : Math.Max(1, (int)tier);
@@ -267,6 +291,10 @@ namespace FrontierArchitect.Game
             if (!double.IsNaN(sr) && sr > 0) b.ServiceRadius = (float)(sr / grid.TileSize);
             var paused = _g.Member(c, "building.paused");
             if (paused is bool p && p) b.Status = "paused";
+            var enabled = _g.Member(c, "building.work_enabled");
+            if (enabled is bool en && !en && b.WorkersMax > 0) b.Status = "paused";
+            double desired = _g.Number(c, "building.workers_desired", double.NaN);
+            if (!double.IsNaN(desired)) b.Extra.Set("worker_limit", desired);
             var uc = _g.Member(c, "building.under_construction");
             if (uc is bool u && u) b.Status = "under_construction";
             double res = _g.Number(c, "building.residents", double.NaN);
@@ -276,6 +304,23 @@ namespace FrontierArchitect.Game
             k.ApplyTo(b);
             if (b.Tier <= 0) b.Tier = 1;
             return b;
+        }
+
+        private readonly Dictionary<object, int> _workersByBuilding = new Dictionary<object, int>();
+
+        /// <summary>Workers per building, counted from each villager's place of work.</summary>
+        private void CountWorkers()
+        {
+            _workersByBuilding.Clear();
+            foreach (var v in _g.Villagers())
+            {
+                var w = _g.Member(v, "villager.workplace");
+                if (w == null) continue;
+                var comp = w as Component;
+                object key = comp != null ? (object)(comp.GetComponent(_g.Map.ResolveType("Building") ?? typeof(Transform)) ?? comp) : w;
+                int n; _workersByBuilding.TryGetValue(key, out n);
+                _workersByBuilding[key] = n + 1;
+            }
         }
 
         private void ReadFields(VillageSnapshot snap)
@@ -332,6 +377,22 @@ namespace FrontierArchitect.Game
         {
             var grid = snap.Grid;
             var cells = new HashSet<Cell>();
+            // Farthest Frontier: road meshes sit on the "Roads" layer; probe every cell (roads change, so no cache)
+            if (Ground.HasRoadLayer && grid.Width > 1)
+            {
+                for (int z = 0; z < grid.Height; z++)
+                    for (int x = 0; x < grid.Width; x++)
+                    {
+                        float wx, wz;
+                        grid.CellCenterWorld(new Cell(x, z), out wx, out wz);
+                        if (Ground.IsRoad(wx, wz)) cells.Add(new Cell(x, z));
+                    }
+                if (cells.Count > 0)
+                {
+                    snap.Roads.Add(new RoadInfo { Type = "existing", Tiles = cells.OrderBy(c => c.Z).ThenBy(c => c.X).ToList() });
+                    return;
+                }
+            }
             foreach (var c in _g.ObjectsOf("Road"))
             {
                 var pts = Reflect.Items(_g.Member(c, "road.points"));
@@ -347,7 +408,7 @@ namespace FrontierArchitect.Game
                     for (int z = min.Z; z <= max.Z; z++) for (int x = min.X; x <= max.X; x++) cells.Add(new Cell(x, z));
                 else cells.Add(grid.WorldToCell(c.transform.position.x, c.transform.position.z));
             }
-            if (cells.Count == 0 && _g.Map.ResolveType("Road") == null) _g.Gaps.Add("road type not found (types.Road)");
+            if (cells.Count == 0) _g.Gaps.Add("no roads found (grid.road_layer / types.Road)");
             if (cells.Count > 0) snap.Roads.Add(new RoadInfo { Type = "existing", Tiles = cells.OrderBy(c => c.Z).ThenBy(c => c.X).ToList() });
         }
 

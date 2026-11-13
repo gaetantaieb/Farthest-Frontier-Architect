@@ -140,7 +140,7 @@ namespace FrontierArchitect.Core.Roads
             var root = _d.LiveBuildings.FirstOrDefault(b => b.Category == "town_center");
             foreach (var b in _d.LiveBuildings.OrderBy(b => b.Id, StringComparer.Ordinal))
             {
-                if (b.Category == "wall" || b.Category == "decoration") continue;
+                if (b.Category == "wall" || b.Category == "gate" || b.Category == "decoration") continue;
                 var cell = AccessCell(b.EntranceCell, b.Footprint);
                 if (cell == null) { list.Add(new Terminal { Id = b.Id, Cell = b.EntranceCell, IsRoot = b == root }); continue; }
                 list.Add(new Terminal { Id = b.Id, Cell = cell.Value, IsRoot = b == root });
@@ -392,6 +392,11 @@ namespace FrontierArchitect.Core.Roads
             var root = terms.FirstOrDefault(t => t.IsRoot);
             if (root == null) return res;
             var start = roads.Contains(root.Cell) ? root.Cell : DraftLayout.Neighbours(root.Cell).FirstOrDefault(roads.Contains);
+            if (!roads.Contains(start))
+            {
+                var tc = _d.LiveBuildings.FirstOrDefault(b => b.Id == root.Id);
+                if (tc != null) start = DraftLayout.Border(tc.Footprint, 1).Concat(DraftLayout.Border(tc.Footprint, 2)).FirstOrDefault(roads.Contains);
+            }
             var seen = new HashSet<Cell>();
             if (roads.Contains(start))
             {
@@ -404,9 +409,16 @@ namespace FrontierArchitect.Core.Roads
                         if (roads.Contains(n) && seen.Add(n)) q.Enqueue(n);
                 }
             }
+            // A building is connected when any tile around its footprint is on the road network
+            // (the door side is a guess), a field when its access tile or border touches it.
+            var footprints = new Dictionary<string, Rect>();
+            foreach (var b in _d.LiveBuildings) footprints[b.Id] = b.Footprint;
+            foreach (var f in _d.Fields) footprints["field:" + f.Id] = f.Rect;
             foreach (var t in terms)
             {
-                bool ok = seen.Contains(t.Cell) || DraftLayout.Neighbours(t.Cell).Any(seen.Contains);
+                Rect r;
+                bool ok = seen.Contains(t.Cell) || DraftLayout.Neighbours(t.Cell).Any(seen.Contains) ||
+                          (footprints.TryGetValue(t.Id, out r) && DraftLayout.Border(r, 1).Any(seen.Contains));
                 if (ok) res.Connected++;
                 else res.Unreachable.Add(t.Id);
             }
