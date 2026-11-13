@@ -22,6 +22,7 @@ namespace FrontierArchitect.Tests
             var k = new KnowledgePack { GameVersion = "test" };
             k.LoadRules(MiniYaml.ParseObject(File.ReadAllText(Path.Combine(AgentsDir, "shared", "buildings.yaml"))));
             k.LoadCrops(MiniYaml.ParseObject(File.ReadAllText(Path.Combine(AgentsDir, "shared", "crops.yaml"))));
+            k.LoadDistricts(MiniYaml.ParseObject(File.ReadAllText(Path.Combine(AgentsDir, "shared", "districts.yaml"))));
             void Spec(string type, int w, int h, int tier, params (string, double)[] cost)
             {
                 var s = new BuildingSpec { Type = type, W = w, H = h, Tier = tier };

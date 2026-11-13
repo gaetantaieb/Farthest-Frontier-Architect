@@ -41,6 +41,8 @@ namespace FrontierArchitect.Core.Planning
     {
         private readonly RunSettings _s;
         private readonly double _foodMonths, _woodMonths;
+        /// <summary>Report the standard phase order as a warning instead of an error (auto-phased plans keep the draft order).</summary>
+        public bool StageOrderIsWarning;
 
         public PlanValidator(RunSettings settings, double foodThresholdMonths = 3, double firewoodThresholdMonths = 3)
         {
@@ -92,7 +94,7 @@ namespace FrontierArchitect.Core.Planning
                 {
                     var primary = stages.Min();
                     if (primary < lastPrimary)
-                        v.Errors.Add("phase " + p.N + " (" + primary + ") comes after a " + lastPrimary + " phase; standard order is Settings, Prepare, Add capacity, Storage and logistics, Production chains, Farming, Residential and services, Clean-up");
+                        (StageOrderIsWarning ? v.Warnings : v.Errors).Add("phase " + p.N + " (" + primary + ") comes after a " + lastPrimary + " phase; standard order is Settings, Prepare, Add capacity, Storage and logistics, Production chains, Farming, Residential and services, Clean-up");
                     lastPrimary = primary > lastPrimary ? primary : lastPrimary;
                 }
 

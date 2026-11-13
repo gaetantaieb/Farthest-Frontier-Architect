@@ -165,6 +165,40 @@ namespace FrontierArchitect.Core.Planning
         }
     }
 
+    /// <summary>A district Claude assigns to one purpose (set_zones); kept with the plan and drawn by the overlay.</summary>
+    public sealed class Zone
+    {
+        public static readonly string[] Purposes = { "housing", "farming", "industry", "storage", "services", "defence", "mixed", "reserve" };
+        public string Name = "";
+        public string Purpose = "mixed";
+        public Rect Rect;
+
+        /// <summary>Building categories that belong in a zone of this purpose.</summary>
+        public static string[] Categories(string purpose)
+        {
+            switch (purpose)
+            {
+                case "housing": return new[] { "housing", "decoration", "service" };
+                case "farming": return new[] { "farm", "food" };
+                case "industry": return new[] { "production", "resource" };
+                case "storage": return new[] { "storage" };
+                case "services": return new[] { "service", "decoration", "town_center" };
+                case "defence": return new[] { "defence", "wall", "gate" };
+                case "reserve": return new string[0];
+                default: return null; // mixed: anything
+            }
+        }
+
+        public static Zone FromJson(JObject o)
+        {
+            Rect r;
+            Rect.TryParse(o["rect"], out r);
+            return new Zone { Name = o.Str("name", ""), Purpose = (o.Str("purpose", "mixed") ?? "mixed").ToLowerInvariant(), Rect = r };
+        }
+
+        public JObject ToJson() => new JObject().Set("name", Name).Set("purpose", Purpose).Set("rect", Rect.ToJson());
+    }
+
     public enum PhaseStatus { NotStarted, AwaitingApproval, InProgress, Paused, Completed, Skipped, Failed, RolledBack }
 
     public sealed class Phase
@@ -241,6 +275,7 @@ namespace FrontierArchitect.Core.Planning
         public string GameVersion = "";
         public List<string> LockedIds = new List<string>();
         public List<string> Warnings = new List<string>();
+        public List<Zone> Zones = new List<Zone>();
 
         public IEnumerable<PlanAction> AllActions()
         {
@@ -258,6 +293,7 @@ namespace FrontierArchitect.Core.Planning
                 ScoreAfter = s.Obj("score_after") ?? new JObject(),
             };
             foreach (var p in o.Arr("phases").Objects()) plan.Phases.Add(Phase.FromJson(p));
+            foreach (var z in o.Arr("zones").Objects()) plan.Zones.Add(Zone.FromJson(z));
             var meta = o.Obj("meta");
             if (meta != null)
             {
@@ -279,7 +315,10 @@ namespace FrontierArchitect.Core.Planning
         {
             var phases = new JArray();
             foreach (var p in Phases) phases.Add(p.ToJson());
+            var zones = new JArray();
+            foreach (var z in Zones) zones.Add(z.ToJson());
             return new JObject()
+                .Set("zones", zones)
                 .Set("scenario", new JObject().Set("ambition", Ambition).Set("summary", Summary)
                     .Set("score_before", ScoreBefore).Set("score_after", ScoreAfter))
                 .Set("phases", phases)

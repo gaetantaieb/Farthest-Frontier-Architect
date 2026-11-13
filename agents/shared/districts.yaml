@@ -1,0 +1,65 @@
+# District templates for the Architect's place_group tool. Hot-reloaded: edit, then regenerate.
+#
+# A template decides WHERE each building of a group goes inside its zone, so Claude chooses
+# what goes in a district and the mod packs it:
+#   hub     - placed first, nearest the zone centre (or the anchor Claude gives)
+#   members - everything not listed elsewhere; placed nearest a hub, inside its service radius when possible
+#   edge    - placed on the side of the zone that faces the Town Center (shared services, trade)
+#   away    - placed on the side farthest from the village's housing (smoke, smell, noise)
+#   spacing - free tiles kept around each building for roads (decorations always pack tight)
+#   default - this template is used when a zone of that purpose is filled without naming one
+# Entries are building types (Well), type prefixes (Market*) or categories (category:storage).
+# guidance is shown to Claude with the template.
+districts:
+  housing_block:
+    purpose: housing
+    default: true
+    hub: [MarketBuilding, Market*, Well]
+    edge: [HealersHouse, School, Academy*, Shrine, Temple, Chapel*, Church*]
+    away: [CompostYard, RatCatcher*, category:production]
+    spacing: 1
+    guidance: "Houses in a ring around a market and wells, every house inside market and well coverage. One well per 8-10 houses: add wells as hub items. Plazas and parks between houses lift desirability. Keep industry out."
+  compact_housing:
+    purpose: housing
+    hub: [MarketBuilding, Market*, Well]
+    edge: [HealersHouse, School, Academy*, Shrine, Temple, Chapel*, Church*]
+    spacing: 0
+    guidance: "Same as housing_block but houses touch: about 30% more houses per area, fewer roads. Use where land is short; villagers still walk between houses."
+  service_core:
+    purpose: services
+    default: true
+    hub: [MarketBuilding, Market*]
+    members: [category:service, category:decoration]
+    edge: [TradingPost*, Treasury*]
+    spacing: 1
+    guidance: "Market, healer, school, chapel and entertainment in one walkable core between the housing blocks, so one trip serves several needs."
+  industry_cluster:
+    purpose: industry
+    default: true
+    hub: [category:storage]
+    away: [Tannery*, CharcoalKiln*, Foundry*, BlacksmithForge*, Smelter*, Brickyard*, Kiln*, SoapShop*]
+    edge: [MarketBuilding, TradingPost*]
+    spacing: 1
+    guidance: "A storehouse or root cellar at the centre with the workshops that feed it around it; chains next to each other (clay pit, brickyard; logs, saw pit; hides, tannery). Smoky buildings on the far side from housing. Buildings bound to a resource (mines, pits, fishing) cannot move: build storage next to them instead."
+  storage_hub:
+    purpose: storage
+    default: true
+    hub: [Storehouse*, StorageBuilding*, Granary*, RootCellar*, Stockyard*]
+    edge: [MarketBuilding, TradingPost*]
+    spacing: 1
+    guidance: "Storage where producer trips meet: between the industry and the housing, close to the market. Food storage (granary, root cellar) near the market, materials (storehouse, stockyard) near industry."
+  farm_belt:
+    purpose: farming
+    default: true
+    hub: [Farmhouse*, Barn*, Granary*]
+    members: [category:farm, category:food]
+    away: [CompostYard*]
+    spacing: 1
+    guidance: "Farm buildings at the centre of the fertile land, gardens and coops around them; fields need fertile, clean, flat ground (fertility 0.6+). Fields themselves are field_create/field_resize actions, not place_group items."
+  defence_line:
+    purpose: defence
+    default: true
+    hub: [Barracks*, Armory*]
+    edge: [TowerLookout*, Tower*, Watchtower*]
+    spacing: 1
+    guidance: "Barracks and armory central to the districts they protect; towers on the side the attacks come from, covering gates and approaches. Walls and gates move only at ambition 5."

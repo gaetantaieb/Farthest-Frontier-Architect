@@ -2,7 +2,7 @@
 # Schema-checked on load: if this file is invalid, the previous good version stays active
 # and the error is shown in the Architect panel.
 agent: architect
-version: 0.1.0
+version: 0.2.0
 model:
   id: most-capable          # resolved to the best model on the account at load
   effort: high              # thinking depth: low | medium | high | xhigh | max (replaces a token budget)
@@ -26,11 +26,12 @@ roads:
   reuse_existing_segments: true
   tile_weight: 100          # yearly walking tiles a new road tile must save to keep a shortcut
 ambition_levels:
+  # max_turns / max_minutes replace the loop limits for that level (bigger redesigns need longer runs)
   1: { name: Touch-up,   max_relocations: 5,   allow: [set_workers, set_production_limit, set_rotation, set_work_circle, relocate] }
   2: { name: Tidy,       max_relocations: 12,  allow: [+build, +road_add, +road_remove] }
-  3: { name: Rework,     max_relocations: 30,  allow: [+field_create, +field_resize, +field_remove, +demolish, +clear_area] }
-  4: { name: Redistrict, max_relocations: 80,  allow: [+flatten] }
-  5: { name: Rebuild,    max_relocations: all, allow: [all], movable: [town_center, walls, gates] }
+  3: { name: Rework,     max_relocations: 30,  allow: [+field_create, +field_resize, +field_remove, +demolish, +clear_area], max_turns: 150, max_minutes: 15 }
+  4: { name: Redistrict, max_relocations: 80,  allow: [+flatten], max_turns: 200, max_minutes: 25 }
+  5: { name: Rebuild,    max_relocations: all, allow: [all], movable: [town_center, walls, gates], max_turns: 260, max_minutes: 35 }
 planning:
   reserve_next_tier: true
   offline_cap: 0.5          # tier 1 and 2 building types only
@@ -42,7 +43,7 @@ planning:
 tools:
   enabled: [get_region, query, find_sites, check_placement, apply_to_draft, undo_draft,
             route_road, route_network, path_distance, coverage, evaluate_rotation,
-            score_draft, forecast_stock, submit_plan]
+            score_draft, forecast_stock, submit_plan, set_zones, place_group]
   descriptions: {}          # tool name -> replacement description shown to Claude
 ops:
   disabled: []              # ops Claude may never propose

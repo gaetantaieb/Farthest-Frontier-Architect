@@ -212,6 +212,9 @@ namespace FrontierArchitect.UI
             GUI.enabled = !C.Busy;
             if (GUILayout.Button(C.Plan == null ? "Generate scenario" : "Regenerate", Styles.Button))
                 C.StartArchitect(new ArchitectRequest { Ambition = req.Ambition, Mode = req.Mode, PlayerNote = _note, SeedRequest = SeedRequest });
+            // next district: keep this plan's unfinished phases and add new ones after them
+            if (C.Plan != null && GUILayout.Button(new GUIContent("Continue plan", "Keep this plan and redesign the districts it did not reach"), Styles.Button, GUILayout.Width(120)))
+                C.StartArchitect(new ArchitectRequest { Ambition = req.Ambition, Mode = req.Mode, PlayerNote = _note, SeedRequest = SeedRequest, ContinueFrom = C.Plan });
             GUI.enabled = true;
             GUILayout.Label("Locked: " + C.Locked.Count + "  (hover a building and press " + C.Config.LockKey + ")", Styles.Small);
             GUILayout.EndHorizontal();
@@ -222,6 +225,8 @@ namespace FrontierArchitect.UI
 
             GUILayout.Space(4);
             GUILayout.Label(plan.Summary, Styles.Wrap);
+            if (plan.Zones.Count > 0)
+                GUILayout.Label("Zones: " + string.Join(", ", plan.Zones.Select(z => z.Name + " (" + z.Purpose + ")").ToArray()), Styles.Small);
             GUILayout.Label("Ambition " + plan.Ambition + " · " + plan.Mode + " · profile " + plan.Profile + " · agent " + plan.AgentHash + " (v" + plan.AgentVersion + ") · " + plan.Model, Styles.Small);
             ScoreTable(plan);
             GUILayout.BeginHorizontal();

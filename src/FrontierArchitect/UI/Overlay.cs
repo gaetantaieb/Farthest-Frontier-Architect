@@ -43,6 +43,8 @@ namespace FrontierArchitect.UI
             GL.PushMatrix();
             GL.Begin(GL.LINES);
             int only = Windows.Architect.OverlayPhase;
+            // zones (set_zones): a tinted outline per district, drawn under the actions
+            foreach (var z in c.Plan.Zones) RectLines(grid, z.Rect, ZoneColour(z.Purpose), 1.2f);
             foreach (var p in c.Plan.Phases)
             {
                 if (only != 0 && p.N != only) continue;
@@ -114,6 +116,20 @@ namespace FrontierArchitect.UI
         {
             float x = g.OriginX + cx * g.TileSize, z = g.OriginZ + cz * g.TileSize;
             return new Vector3(x, Game.Ground.Height(x, z) + lift, z);
+        }
+
+        private static Color ZoneColour(string purpose)
+        {
+            switch (purpose)
+            {
+                case "housing": return new Color(1f, 0.85f, 0.3f, 0.8f);
+                case "farming": return new Color(0.4f, 0.9f, 0.3f, 0.8f);
+                case "industry": return new Color(0.9f, 0.45f, 0.2f, 0.8f);
+                case "storage": return new Color(0.6f, 0.5f, 0.95f, 0.8f);
+                case "services": return new Color(0.3f, 0.8f, 0.95f, 0.8f);
+                case "defence": return new Color(0.95f, 0.25f, 0.25f, 0.8f);
+                default: return new Color(0.8f, 0.8f, 0.8f, 0.6f);
+            }
         }
 
         private static void Seg(Vector3 a, Vector3 b, Color c) { GL.Color(c); GL.Vertex(a); GL.Vertex(b); }

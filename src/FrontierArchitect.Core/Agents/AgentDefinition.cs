@@ -13,6 +13,9 @@ namespace FrontierArchitect.Core.Agents
         public int Level;
         public string Name = "";
         public int MaxRelocations = -1;
+        /// <summary>Loop limits for this level (0 = the loop section's values); bigger redesigns need more turns.</summary>
+        public int MaxTurns;
+        public double MaxMinutes;
         public HashSet<string> Allow = new HashSet<string>();
         public HashSet<string> Movable = new HashSet<string>();
     }
@@ -117,6 +120,10 @@ namespace FrontierArchitect.Core.Agents
                 var al = new AmbitionLevel { Level = level, Name = lv.Str("name", AmbitionNames[level]) };
                 object mr = lv["max_relocations"];
                 al.MaxRelocations = mr is string s && s == "all" ? -1 : (int)Json.ToLong(mr, -1);
+                al.MaxTurns = lv.Int("max_turns", 0);
+                al.MaxMinutes = lv.Num("max_minutes", 0);
+                if (al.MaxTurns < 0 || al.MaxTurns > 500) errors.Add("ambition_levels." + level + ".max_turns must be 0..500");
+                if (al.MaxMinutes < 0 || al.MaxMinutes > 120) errors.Add("ambition_levels." + level + ".max_minutes must be 0..120");
                 var allow = new HashSet<string>(prev);
                 foreach (var item in lv.Arr("allow").Strings())
                 {

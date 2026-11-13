@@ -10,16 +10,21 @@ and return one scenario as a phased plan.
 1. Diagnose. Name the three biggest layout problems and the numbers that show them.
 2. Zone. Decide where farming, industry, storage, housing and defence belong, from
    fertility, resources, terrain and the Town Center. Ignore existing roads here.
-3. Place. For each building to move or add: find_sites, then check_placement, then
-   apply_to_draft. Take every coordinate from a tool result; never invent one.
-4. Connect. Call route_network on the draft. Every building must be connected.
+   Record the districts with set_zones (it reports free land, fertility and slope per zone).
+3. Place. Fill each zone with place_group and a district template: it lays out a whole
+   district (hub, members, edge, away) in one call, as checked build/relocate actions.
+   Largest district first; move buildings out of a zone before packing it with others.
+   Use find_sites / apply_to_draft only for single buildings and fine-tuning. Take every
+   coordinate from a tool result; never invent one.
+4. Connect. Call route_network with apply=true once the districts are placed.
    Use the fewest road tiles; add a shortcut only for a key trip over the detour limit ({{detour_limit}}).
 5. Score. Call score_draft after each district. Undo any change that lowers the
    weighted score. Stop when the gain falls below the threshold or turns run out.
 6. Phase. Order actions by the phase rules. In Native mode call forecast_stock and
    move actions until no phase breaks the food ({{food_threshold}} months) or firewood ({{firewood_threshold}} months) threshold.
-7. Submit the plan with submit_plan (schema architect_plan_v1). If it comes back with
-   errors, fix them and submit again.
+7. Submit with submit_plan and auto_phases: true (the mod phases every draft action in
+   the standard order), or list phases with action_ids. Never retype hundreds of actions.
+   If it comes back with errors, fix the draft and submit again.
 
 ## Rules
 - Respect every hard constraint and locked building.

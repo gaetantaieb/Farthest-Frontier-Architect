@@ -440,3 +440,134 @@ namespace FrontierArchitect.Tests
         }
     }
 }
+
+namespace FrontierArchitect.Tests
+{
+    /// <summary>District-scale redesign (v0.5): zones, place_group with templates, auto-phases, continuing a plan.</summary>
+    public class DistrictTests
+    {
+        private static ArchitectToolHost Host(VillageSnapshot snap = null, ArchitectPlan prior = null) =>
+            new ArchitectToolHost(snap ?? Village.Build(), A.Settings(), null, null, 3, 3, 0.5, 10, prior);
+
+        private static JObject Run(ArchitectToolHost h, string tool, string json)
+        {
+            var r = h.Execute(tool, Json.ParseObject(json), CancellationToken.None);
+            Assert.False(r.IsError, tool + ": " + r.Content);
+            return Json.ParseObject(r.Content);
+        }
+
+        private static readonly string Zones =
+            "{\"zones\":[{\"name\":\"east_housing\",\"purpose\":\"housing\",\"rect\":[34,6,22,20]},{\"name\":\"west_ind\",\"purpose\":\"industry\",\"rect\":[8,6,16,16]}]}";
+
+        [Fact]
+        public void ZonesAreReportedAndAHousingBlockIsLaidOutInOneCall()
+        {
+            var h = Host();
+            var z = Run(h, "set_zones", Zones);
+            Assert.Equal(2, z.Arr("zones").Count);
+            Assert.True(z.Arr("zones").Objects().First().Long("free_tiles") > 300);
+
+            var g = Run(h, "place_group", "{\"zone\":\"east_housing\",\"items\":[{\"type\":\"Well\",\"count\":1},{\"type\":\"House\",\"count\":8}]}");
+            Assert.Equal("housing_block", g.Str("template"));          // default template for a housing zone
+            Assert.Equal(9, g.Arr("placed").Count);
+            Assert.Empty(g.Arr("unplaced"));
+            var placed = g.Arr("placed").Objects().ToList();
+            Assert.Equal("hub", placed[0].Str("role"));                // the well goes first, at the centre
+            var zone = new Rect(34, 6, 22, 20);
+            var houses = h.Draft.LiveBuildings.Where(b => b.Id.StartsWith("new:House")).ToList();
+            Assert.Equal(8, houses.Count);
+            Assert.All(houses, b => Assert.True(zone.Contains(b.Center)));
+            // spacing 1: no two new houses touch
+            foreach (var a in houses)
+                foreach (var b in houses)
+                    if (a != b) Assert.False(new Rect(a.Footprint.X - 1, a.Footprint.Z - 1, a.Footprint.W + 2, a.Footprint.H + 2).Overlaps(b.Footprint), a.Id + " touches " + b.Id);
+            var well = h.Draft.LiveBuildings.First(b => b.Id.StartsWith("new:Well"));
+            Assert.All(houses, b => Assert.True(b.Center.DistanceTo(well.Center) <= System.Math.Max(8, well.ServiceRadius) + 1, b.Id));
+        }
+
+        [Fact]
+        public void PlaceGroupRelocatesBuildingsAndKeepsThoseAlreadyWellPlaced()
+        {
+            var h = Host();
+            Run(h, "set_zones", Zones);
+            var g = Run(h, "place_group", "{\"zone\":\"east_housing\",\"items\":[{\"move_type\":\"House\"}]}");
+            int moved = g.Arr("placed").Count, kept = g.Arr("kept_in_place").Count;
+            Assert.Equal(3, moved + kept);
+            Assert.Contains("House@36,20", g.Arr("kept_in_place").Strings().Concat(g.Arr("placed").Objects().Select(p => p.Str("target"))));
+            Assert.Equal(moved, h.Draft.RelocationCount);
+        }
+
+        [Fact]
+        public void UnknownZoneOrTemplateIsExplained()
+        {
+            var h = Host();
+            var r = h.Execute("place_group", Json.ParseObject("{\"zone\":\"nowhere\",\"items\":[{\"type\":\"House\"}]}"), CancellationToken.None);
+            Assert.True(r.IsError);
+            Assert.Contains("set_zones", r.Content);
+            r = h.Execute("place_group", Json.ParseObject("{\"area\":[34,6,22,20],\"template\":\"castle\",\"items\":[{\"type\":\"House\"}]}"), CancellationToken.None);
+            Assert.True(r.IsError);
+            Assert.Contains("housing_block", r.Content);
+        }
+
+        [Fact]
+        public void AutoPhasesTurnTheDraftIntoAValidPlan()
+        {
+            var h = Host();
+            Run(h, "set_zones", Zones);
+            Run(h, "place_group", "{\"zone\":\"east_housing\",\"items\":[{\"type\":\"Well\"},{\"type\":\"House\",\"count\":14}]}");
+            Run(h, "place_group", "{\"zone\":\"west_ind\",\"items\":[{\"type\":\"Storehouse\"},{\"type\":\"FirewoodSplitter\",\"count\":2}]}");
+            Run(h, "route_network", "{\"apply\":true}");
+            int applied = h.Draft.Applied.Count;
+            var r = h.Execute("submit_plan", Json.ParseObject("{\"scenario\":{\"summary\":\"east housing block and west industry\"},\"auto_phases\":true}"), CancellationToken.None);
+            Assert.False(r.IsError, r.Content);
+            var plan = h.AcceptedPlan;
+            Assert.Equal(applied, plan.AllActions().Count());
+            Assert.All(plan.Phases, p => Assert.True(p.Actions.Count <= 12));
+            Assert.Equal(2, plan.Zones.Count);
+            var json = Json.ParseObject(Json.Write(plan.ToJson()));
+            Assert.Equal(2, ArchitectPlan.FromJson(json).Zones.Count);   // zones survive the plan file
+        }
+
+        [Fact]
+        public void PhasesCanReferToDraftActionsById()
+        {
+            var h = Host();
+            var g = Run(h, "place_group", "{\"area\":[34,6,22,20],\"items\":[{\"type\":\"Well\"},{\"type\":\"House\",\"count\":2}]}");
+            Assert.Equal("housing_block", g.Str("template"));             // inferred from the items
+            var net = Run(h, "route_network", "{\"apply\":true,\"remove_unused\":false}");
+            var ids = new JArray(g.Arr("placed").Objects().Select(p => (object)p.Str("id")));
+            foreach (var a in h.Draft.Applied.Where(a => a.Op == "road_add")) ids.Insert(0, a.Id);
+            var plan = new JObject().Set("scenario", new JObject().Set("summary", "s"))
+                .Set("phases", new JArray { new JObject().Set("n", 1).Set("name", "Housing").Set("action_ids", ids) });
+            var r = h.Execute("submit_plan", plan, CancellationToken.None);
+            Assert.False(r.IsError, r.Content + " placed: " + g.ToString());
+            Assert.Equal(ids.Count, h.AcceptedPlan.AllActions().Count());
+            var bad = h.Execute("submit_plan", Json.ParseObject("{\"scenario\":{\"summary\":\"s\"},\"phases\":[{\"n\":1,\"name\":\"x\",\"action_ids\":[\"zz9\"]}]}"), CancellationToken.None);
+            Assert.True(bad.IsError);
+        }
+
+        [Fact]
+        public void ContinuingAPlanKeepsItsPhasesInFront()
+        {
+            var first = Host();
+            Run(first, "set_zones", Zones);
+            Run(first, "place_group", "{\"zone\":\"east_housing\",\"items\":[{\"type\":\"Well\"},{\"type\":\"House\",\"count\":4}]}");
+            Run(first, "route_network", "{\"apply\":true,\"remove_unused\":false}");
+            var r1 = first.Execute("submit_plan", Json.ParseObject("{\"scenario\":{\"summary\":\"one\"},\"auto_phases\":true}"), CancellationToken.None);
+            Assert.False(r1.IsError, r1.Content);
+            var prior = first.AcceptedPlan;
+
+            var second = Host(null, prior);
+            Assert.Equal(first.Draft.Applied.Count, second.PriorActionCount);
+            Assert.True(second.Execute("undo_draft", new JObject(), CancellationToken.None).IsError);
+            Assert.Equal(2, second.Zones.Count);
+            Run(second, "place_group", "{\"zone\":\"west_ind\",\"items\":[{\"type\":\"Storehouse\"}]}");
+            Run(second, "route_network", "{\"apply\":true,\"remove_unused\":false}");
+            var r = second.Execute("submit_plan", Json.ParseObject("{\"scenario\":{\"summary\":\"two\"},\"auto_phases\":true}"), CancellationToken.None);
+            Assert.False(r.IsError, r.Content);
+            var plan = second.AcceptedPlan;
+            Assert.Equal(second.Draft.Applied.Count, plan.AllActions().Count());
+            Assert.Equal(prior.Phases[0].Actions[0].Id, plan.Phases[0].Actions[0].Id);
+        }
+    }
+}

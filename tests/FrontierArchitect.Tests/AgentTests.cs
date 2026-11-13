@@ -37,6 +37,8 @@ namespace FrontierArchitect.Tests
             Assert.DoesNotContain(Ops.Flatten, arch.Definition.Ambition[3].Allow);
             Assert.Contains("town_center", arch.Definition.Ambition[5].Movable);
             Assert.Contains("wall", arch.Definition.Ambition[5].Movable);
+            Assert.Equal(260, arch.Definition.Ambition[5].MaxTurns);
+            Assert.Equal(0, arch.Definition.Ambition[2].MaxTurns);
             Assert.Equal(6, arch.Definition.Weights.Values.Sum(), 6); // normalised
             Assert.Contains("coordinates.md", arch.Knowledge.Keys);
         }

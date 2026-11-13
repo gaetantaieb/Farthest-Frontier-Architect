@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using FrontierArchitect.Core.Data;
@@ -85,6 +86,14 @@ namespace FrontierArchitect.Core.Model
         public readonly List<CategoryRule> Rules = new List<CategoryRule>();
         public readonly HashSet<string> TierOneTwoCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public string Notes = "";
+        /// <summary>District templates (agents/shared/districts.yaml): name → {purpose, hub, edge, away, spacing, guidance…}.</summary>
+        public JObject Districts = new JObject();
+
+        /// <summary>Loads agents/shared/districts.yaml.</summary>
+        public void LoadDistricts(JObject doc)
+        {
+            Districts = doc?.Obj("districts") ?? new JObject();
+        }
 
         public BuildingSpec Spec(string type)
         {
@@ -244,6 +253,13 @@ namespace FrontierArchitect.Core.Model
                 var tiers = new List<int>(TierUnlocks.Keys);
                 tiers.Sort();
                 foreach (var t in tiers) sb.Append("- tier ").Append(t).Append(": ").Append(string.Join(", ", TierUnlocks[t])).Append('\n');
+                sb.Append('\n');
+            }
+            if (Districts.Count > 0)
+            {
+                sb.Append("## District templates (place_group template=<name>)\n");
+                foreach (var name in Districts.Keys.OrderBy(x => x, StringComparer.Ordinal))
+                    sb.Append("- ").Append(name).Append(": ").Append(Json.Write(Districts.Obj(name))).Append('\n');
                 sb.Append('\n');
             }
             if (!string.IsNullOrEmpty(Notes)) sb.Append(Notes).Append('\n');

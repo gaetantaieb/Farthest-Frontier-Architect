@@ -3,6 +3,29 @@
 Every version listed here is published by the release workflow (`.github/workflows/release.yml`) when it reaches `main`.
 The in-game updater shows the section of the version it installs.
 
+## [0.5.0] - 2026-11-13
+
+District-scale redesign: the Architect can now replan whole districts instead of moving buildings one by one.
+
+- **Zones** (`set_zones`): Claude first draws the districts (housing, farming, industry, storage, services, defence,
+  mixed, reserve) and gets free land, fertility, slope and the buildings already inside each one. Zones are saved with
+  the plan, listed in the Architect panel and drawn on the overlay in one colour per purpose.
+- **District templates** (`agents/shared/districts.yaml`, editable and hot-reloaded): housing_block, compact_housing,
+  service_core, industry_cluster, storage_hub, farm_belt, defence_line. A template says which buildings are the hub
+  (centre), which go on the edge facing the Town Center, which stay away from housing, and how many free tiles to keep
+  for roads.
+- **`place_group`**: lays out a whole district in one call — up to 150 builds and relocations (`{type, count}`,
+  `{move: [ids]}`, `{move_type, count}`), each a checked action on the draft. Members go inside the hub's service
+  radius; buildings that already stand well are kept in place; blocked relocations are retried; `apply: false` previews.
+- **`submit_plan` without retyping**: `auto_phases: true` phases every draft action in the standard order (splitting at
+  the max actions per phase and the offline cap, falling back to draft order when the standard order would break), or
+  phases can list `action_ids`. The last run spent 8,000 output tokens retyping 92 actions.
+- **Longer runs for bigger redesigns**: ambition levels can set `max_turns` / `max_minutes` (3: 150 / 15 min,
+  4: 200 / 25 min, 5: 260 / 35 min).
+- **Continue plan** button: a new run starts from the current plan's unfinished actions (and zones), works on the
+  districts it did not reach and adds its phases after the existing ones. Completed phases are not repeated.
+- `set_zones` and `place_group` are enabled even when a customised `agent.yaml` lists older tools.
+
 ## [0.4.0] - 2026-11-13
 
 From the first successful Architect run (ambition 2, 244 villagers, Medium map). The run cost 320k prompt tokens and

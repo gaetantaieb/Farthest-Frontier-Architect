@@ -226,7 +226,7 @@ namespace FrontierArchitect.Tests
             Assert.Contains("Touch-up", user);
             Assert.Contains("\"buildings\"", user);
             Assert.Contains("Game knowledge pack", body.Arr("system").Objects().First().Str("text")); // cached block first
-            Assert.Equal(14, body.Arr("tools").Count);
+            Assert.Equal(16, body.Arr("tools").Count);
 
             // run log: start, 2 turns with reasoning summaries, 2 tool results, end with the plan; no API key
             var logFile = System.IO.Directory.GetFiles(logDir, "*.jsonl").Single();

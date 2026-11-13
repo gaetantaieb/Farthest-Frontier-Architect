@@ -48,7 +48,7 @@ namespace FrontierArchitect.Tests
             var o = MiniYaml.ParseObject(File.ReadAllText(Path.Combine(Village.AgentsDir, "architect", "agent.yaml")));
             Assert.Equal("architect", o.Str("agent"));
             Assert.Equal(1.3, o.Obj("roads").Num("detour_limit"));
-            Assert.Equal(14, o.Obj("tools").Arr("enabled").Count); // flow list spanning two lines
+            Assert.Equal(16, o.Obj("tools").Arr("enabled").Count); // flow list spanning two lines
             var l5 = o.Obj("ambition_levels").Obj("5");
             Assert.Equal("all", l5["max_relocations"]);
             Assert.Equal(new[] { "town_center", "walls", "gates" }, l5.Arr("movable").Strings());

@@ -35,6 +35,8 @@ namespace FrontierArchitect.Core
         public List<string> Locked = new List<string>();
         public string PlayerNote = "";
         public string SeedRequest = "";
+        /// <summary>Continue this plan: its unfinished actions start on the draft and its phases stay in front.</summary>
+        public ArchitectPlan ContinueFrom;
     }
 
     public sealed class ArchitectOutcome
@@ -167,9 +169,18 @@ namespace FrontierArchitect.Core
             var s = Settings(agent, req, ctx);
             var vars = ArchitectVars(agent, snap, req, s, ctx);
             var host = new ArchitectToolHost(snap, s, d.EnabledTools.Count > 0 ? d.EnabledTools : null, d.ToolDescriptions,
-                ctx.FoodMonths, ctx.FirewoodMonths, d.StopIfGainBelow, d.GainWindowTurns);
-            var cfg = BaseConfig(agent, ctx, StaticContext(agent, snap), Template.Render(agent.SystemTemplate, vars), Template.Render(agent.TaskTemplate, vars));
+                ctx.FoodMonths, ctx.FirewoodMonths, d.StopIfGainBelow, d.GainWindowTurns, req.ContinueFrom);
+            string user = Template.Render(agent.TaskTemplate, vars);
+            if (req.ContinueFrom != null) user = ContinueNote(host, req.ContinueFrom) + "\n\n" + user;
+            var cfg = BaseConfig(agent, ctx, StaticContext(agent, snap), Template.Render(agent.SystemTemplate, vars), user);
+            AmbitionLevel lv;
+            if (d.Ambition.TryGetValue(s.Ambition, out lv))
+            {
+                if (lv.MaxTurns > 0) cfg.MaxTurns = lv.MaxTurns;
+                if (lv.MaxMinutes > 0) cfg.MaxMinutes = lv.MaxMinutes;
+            }
             var meta = Meta(agent, snap, ctx).Set("ambition", req.Ambition).Set("mode", req.Mode)
+                .Set("continues_plan", req.ContinueFrom != null).Set("max_turns", cfg.MaxTurns).Set("max_minutes", cfg.MaxMinutes)
                 .Set("locked", req.Locked.ToJArray()).Set("player_note", req.PlayerNote).Set("seed_request", req.SeedRequest);
             var res = RunLogged(ctx, "architect", snap, meta, cfg, host, progress, cancel, r => PlanJson(r));
             var outcome = new ArchitectOutcome { Agent = res };
@@ -179,6 +190,23 @@ namespace FrontierArchitect.Core
             outcome.Validation = kv.Value;
             Stamp(outcome.Plan, agent, snap, req, res.Model, ctx);
             return outcome;
+        }
+
+        /// <summary>What Claude is told when it continues an earlier plan.</summary>
+        private static string ContinueNote(ArchitectToolHost host, ArchitectPlan prior)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("## Continue the previous plan\n");
+            sb.Append("Previous scenario: ").Append(prior.Summary).Append('\n');
+            sb.Append("Its ").Append(host.PriorActionCount).Append(" unfinished actions (").Append(host.PriorPhaseCount)
+              .Append(" phases) are already applied to your draft; score_draft starts from there. Do not repeat them, and do not undo them.\n");
+            if (prior.Zones.Count > 0)
+                sb.Append("Its zones (already set; change them with set_zones if needed): ").Append(Json.Write(new JArray(prior.Zones.Select(z => (object)z.ToJson())))).Append('\n');
+            var touched = prior.AllActions().Where(a => a.Target != null && (a.Op == Ops.Relocate || a.Op == Ops.Demolish)).Select(a => a.Target).Distinct().Take(80).ToList();
+            if (touched.Count > 0) sb.Append("Buildings it already moves or removes: ").Append(string.Join(", ", touched)).Append('\n');
+            foreach (var n in host.PriorNotes.Take(10)) sb.Append("- note: ").Append(n).Append('\n');
+            sb.Append("Work on the districts it did not reach. Submit only your new phases (or auto_phases: true); the mod keeps the previous phases in front of them.");
+            return sb.ToString();
         }
 
         private static object PlanJson(AgentResult r)

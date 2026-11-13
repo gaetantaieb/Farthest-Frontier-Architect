@@ -69,21 +69,32 @@ namespace FrontierArchitect.Game
 
         public KnowledgePack Knowledge()
         {
-            if (_cachedKnowledge != null && _cachedKnowledgeVersion == Application.version) return _cachedKnowledge;
-            var k = new KnowledgePack { GameVersion = Application.version };
             string shared = System.IO.Path.Combine(Paths.Agents, "shared");
+            // the shared yaml files are edited by players: rebuild the pack when any of them changes
+            string stamp = Application.version;
+            try
+            {
+                if (System.IO.Directory.Exists(shared))
+                    foreach (var f in System.IO.Directory.GetFiles(shared, "*.yaml").OrderBy(f => f, StringComparer.Ordinal))
+                        stamp += "|" + System.IO.Path.GetFileName(f) + "@" + System.IO.File.GetLastWriteTimeUtc(f).Ticks;
+            }
+            catch { }
+            if (_cachedKnowledge != null && _cachedKnowledgeVersion == stamp) return _cachedKnowledge;
+            var k = new KnowledgePack { GameVersion = Application.version };
             try
             {
                 string by = System.IO.Path.Combine(shared, "buildings.yaml");
                 if (System.IO.File.Exists(by)) k.LoadRules(MiniYaml.ParseObject(System.IO.File.ReadAllText(by)));
                 string cy = System.IO.Path.Combine(shared, "crops.yaml");
                 if (System.IO.File.Exists(cy)) k.LoadCrops(MiniYaml.ParseObject(System.IO.File.ReadAllText(cy)));
+                string dy = System.IO.Path.Combine(shared, "districts.yaml");
+                if (System.IO.File.Exists(dy)) k.LoadDistricts(MiniYaml.ParseObject(System.IO.File.ReadAllText(dy)));
             }
             catch (Exception e) { Log.Warn("agents/shared yaml: " + e.Message); }
             ExtractBuildingData(k);
             ExtractCrops(k);
             _cachedKnowledge = k;
-            _cachedKnowledgeVersion = Application.version;
+            _cachedKnowledgeVersion = stamp;
             return k;
         }
 

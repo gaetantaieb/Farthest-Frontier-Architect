@@ -24,7 +24,8 @@ namespace FrontierArchitect.Core.Tools
         public static readonly string[] AllToolNames =
         {
             "get_region", "query", "find_sites", "check_placement", "apply_to_draft", "undo_draft", "route_road",
-            "route_network", "path_distance", "coverage", "evaluate_rotation", "score_draft", "forecast_stock", "submit_plan"
+            "route_network", "path_distance", "coverage", "evaluate_rotation", "score_draft", "forecast_stock", "submit_plan",
+            "set_zones", "place_group"
         };
 
         private readonly VillageSnapshot _snap;
@@ -41,10 +42,18 @@ namespace FrontierArchitect.Core.Tools
         public ArchitectPlan AcceptedPlan { get; private set; }
         public PlanValidation LastValidation { get; private set; }
         public double BaselineScore { get; }
+        public List<Zone> Zones { get; } = new List<Zone>();
+        /// <summary>Unfinished phases of the plan this run continues (kept in front of the new phases).</summary>
+        private readonly List<Phase> _priorPhases = new List<Phase>();
+        private int _priorActions;
+        private int _groupCounter;
+        public int PriorActionCount => _priorActions;
+        public int PriorPhaseCount => _priorPhases.Count;
+        public List<string> PriorNotes { get; } = new List<string>();
 
         public ArchitectToolHost(VillageSnapshot snapshot, RunSettings settings, IEnumerable<string> enabledTools,
             IDictionary<string, string> descriptionOverrides, double foodMonths, double woodMonths,
-            double stopIfGainBelow = 0.5, int gainWindowTurns = 10)
+            double stopIfGainBelow = 0.5, int gainWindowTurns = 10, ArchitectPlan continueFrom = null)
         {
             _snap = snapshot;
             _s = settings;
@@ -54,9 +63,13 @@ namespace FrontierArchitect.Core.Tools
             _gainWindow = Math.Max(2, gainWindowTurns);
             Draft = new DraftLayout(snapshot);
             BaselineScore = new Scorer(_s).Score(Draft).Weighted;
-            _scoreHistory.Add(BaselineScore);
+            if (continueFrom != null) LoadPrior(continueFrom);
+            _scoreHistory.Add(_priorActions > 0 ? new Scorer(_s).Score(Draft).Weighted : BaselineScore);
             var enabled = new HashSet<string>(enabledTools ?? AllToolNames);
             enabled.Add("submit_plan");
+            // tools added in 0.5: on even when an older or customised agent.yaml lists the enabled tools
+            enabled.Add("set_zones");
+            enabled.Add("place_group");
             foreach (var spec in Specs())
             {
                 if (!enabled.Contains(spec.Name)) continue;
@@ -67,6 +80,29 @@ namespace FrontierArchitect.Core.Tools
         }
 
         public IList<ToolSpec> Tools => _tools;
+
+        /// <summary>Applies the unfinished actions of an earlier plan to the draft (completed phases are already in the village).</summary>
+        private void LoadPrior(ArchitectPlan prior)
+        {
+            foreach (var z in prior.Zones) Zones.Add(z);
+            foreach (var p in prior.Phases)
+            {
+                if (p.Status == PhaseStatus.Completed || p.Status == PhaseStatus.Skipped) continue;
+                var copy = Phase.FromJson(p.ToJson());
+                copy.Status = PhaseStatus.NotStarted;
+                copy.Actions.RemoveAll(a => a.Status == ActionStatus.Rejected);
+                var kept = new List<PlanAction>();
+                foreach (var a in copy.Actions)
+                {
+                    var r = Draft.Apply(a, _s);
+                    if (r.Valid) kept.Add(a);
+                    else PriorNotes.Add("previous action " + a.Id + " (" + a.Op + " " + a.Target + ") no longer fits and was dropped: " + string.Join("; ", r.Reasons));
+                }
+                copy.Actions = kept;
+                if (kept.Count > 0) _priorPhases.Add(copy);
+            }
+            _priorActions = Draft.Applied.Count;
+        }
 
         public string MissingSubmitMessage =>
             "You ended your turn without calling submit_plan. Call submit_plan now with the complete plan (scenario + phases).";
@@ -127,19 +163,45 @@ namespace FrontierArchitect.Core.Tools
                 new ToolSpec { Name = "forecast_stock", Description =
                     "Projected food months, firewood months and materials through a list of phases in Native mode. Pass the phases you plan (same shape as submit_plan phases).",
                     InputSchema = S.Obj(S.Props("phases", S.Arr(S.AnyObj("phase"), "phases")), "phases") },
+                new ToolSpec { Name = "set_zones", Description =
+                    "Declare the districts of the redesign before placing anything: each zone has a name, a purpose (" + string.Join(", ", Zone.Purposes) +
+                    ") and a rect [x,z,w,h]. Replaces the previous zones. Returns each zone's free land, average fertility, slope, water and the buildings now inside it, " +
+                    "and how well current buildings fit their zones. place_group can then fill a zone by name.",
+                    InputSchema = S.Obj(S.Props("zones", S.Arr(S.Obj(S.Props("name", S.Str("short unique name, e.g. north_housing"),
+                        "purpose", S.Enum("what the zone is for", Zone.Purposes), "rect", new JObject().Set("description", "[x,z,w,h] in tiles")), "name", "purpose", "rect"), "zones")), "zones") },
+                new ToolSpec { Name = "place_group", Description =
+                    "Lay out a whole district in one call. Give a zone name (from set_zones) or an area [x,z,w,h], a district template (see the District templates " +
+                    "section of the knowledge pack; it decides the arrangement: hub at the centre, members around it, edge buildings toward the Town Center, polluters " +
+                    "away from housing) and the items: {\"type\": T, \"count\": n} to build, {\"move\": [ids]} to relocate given buildings, or {\"move_type\": T, " +
+                    "\"count\": n} to relocate the n buildings of a type farthest from the area. Buildings keep 'spacing' free tiles around them for roads. " +
+                    "Each placement is a checked build/relocate action applied to the draft (apply=false to preview). Returns placed, kept-in-place and unplaced items, " +
+                    "the action ids and the score change. Follow with route_network once the districts are placed.",
+                    InputSchema = S.Obj(S.Props(
+                        "zone", S.Str("zone name from set_zones"),
+                        "area", new JObject().Set("description", "[x,z,w,h] when no zone is given"),
+                        "template", S.Str("district template name (optional; the zone purpose picks a default)"),
+                        "items", S.Arr(S.AnyObj("{type, count} | {move: [ids]} | {move_type, count}"), "what to place"),
+                        "anchor", new JObject().Set("description", "[x,z] centre of the layout (default: the area centre)"),
+                        "spacing", S.Int("free tiles kept around each building (0-3; default from the template)"),
+                        "objective", S.Enum("objective tag for the actions", "O1", "O2", "O3", "O4", "O5", "O6"),
+                        "rationale", S.Str("one line for every action of the group"),
+                        "apply", S.Bool("apply to the draft (default true)")), "items") },
                 new ToolSpec { Name = "submit_plan", Description =
                     "Submit the final scenario. The mod re-validates every action, the phase order, the offline cap, seasons, road connectivity and (Native) stocks. " +
-                    "If anything fails you get the errors back and can fix and resubmit.",
+                    "If anything fails you get the errors back and can fix and resubmit. Shortcuts: auto_phases=true phases every draft action for you (standard order, " +
+                    "max actions per phase, offline cap); or give each phase \"action_ids\" (ids of applied draft actions) instead of repeating the actions.",
                     InputSchema = S.Obj(S.Props(
                         "scenario", S.Obj(S.Props("ambition", S.Int("1-5"), "summary", S.Str("two or three sentences")), "summary"),
+                        "auto_phases", S.Bool("let the mod build the phases from the draft actions"),
                         "phases", S.Arr(S.Obj(S.Props(
                             "n", S.Int("phase number from 1"), "name", S.Str("short name"), "goal", S.Str("what the phase achieves"),
                             "season_window", S.Arr(S.Enum("slot", "spring", "summer", "early_autumn", "late_autumn", "winter"), "when it may start"),
                             "depends_on", S.Arr(S.Int("phase"), "phases that must finish first"),
                             "actions", S.Arr(action, "actions"),
+                            "action_ids", S.Arr(S.Str("draft action id"), "ids of applied draft actions, in order (instead of actions)"),
                             "offline", S.Arr(S.Str("building id"), "buildings offline during the phase"),
-                            "est_cost", S.AnyObj("item -> amount"), "est_days", S.Num("estimated game days")), "n", "name", "actions"), "phases")),
-                        "scenario", "phases") },
+                            "est_cost", S.AnyObj("item -> amount"), "est_days", S.Num("estimated game days")), "n", "name"), "phases")),
+                        "scenario") },
             };
         }
 
@@ -168,6 +230,8 @@ namespace FrontierArchitect.Core.Tools
                 case "score_draft": return ScoreDraft();
                 case "forecast_stock": return ForecastStock(input);
                 case "submit_plan": return SubmitPlan(input);
+                case "set_zones": return SetZones(input);
+                case "place_group": return PlaceGroup(input, cancel);
             }
             return ToolOutcome.Error("not implemented: " + name);
         }
@@ -292,7 +356,8 @@ namespace FrontierArchitect.Core.Tools
             foreach (var x in Draft.Fields) f.Add(x.ToJson());
             var applied = new JArray();
             foreach (var a in Draft.Applied) applied.Add(a.ToJson());
-            return new JObject().Set("summary", Draft.Summary()).Set("buildings", b).Set("fields", f).Set("applied", applied)
+            var zones = new JArray(); foreach (var z in Zones) zones.Add(z.ToJson());
+            return new JObject().Set("summary", Draft.Summary()).Set("zones", zones).Set("buildings", b).Set("fields", f).Set("applied", applied)
                 .Set("demolished", Draft.Demolished.ToJArray()).Set("road_tile_count", Draft.Roads.Count);
         }
 
@@ -426,6 +491,7 @@ namespace FrontierArchitect.Core.Tools
 
         private ToolOutcome UndoDraft()
         {
+            if (Draft.Applied.Count <= _priorActions) return ToolOutcome.Error(_priorActions > 0 ? "only the previous plan's actions are left; they cannot be undone in this run" : "nothing to undo");
             var undone = Draft.Undo(_s);
             if (undone == null) return ToolOutcome.Error("nothing to undo");
             double now = Weighted();
@@ -631,26 +697,522 @@ namespace FrontierArchitect.Core.Tools
                 .Set("mode", _s.Mode));
         }
 
+        // ------------------------------------------------------------------ zones
+
+        private ToolOutcome SetZones(JObject input)
+        {
+            var list = new List<Zone>();
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var g = Draft.Grid;
+            foreach (var zo in input.Arr("zones").Objects())
+            {
+                var z = Zone.FromJson(zo);
+                if (string.IsNullOrWhiteSpace(z.Name)) return ToolOutcome.Error("every zone needs a name");
+                if (!names.Add(z.Name)) return ToolOutcome.Error("zone name '" + z.Name + "' is used twice");
+                if (!Zone.Purposes.Contains(z.Purpose)) return ToolOutcome.Error("zone " + z.Name + ": purpose must be one of " + string.Join(", ", Zone.Purposes));
+                if (z.Rect.W < 3 || z.Rect.H < 3) return ToolOutcome.Error("zone " + z.Name + ": rect must be [x,z,w,h] with w and h of at least 3");
+                int x0 = Math.Max(0, z.Rect.X), z0 = Math.Max(0, z.Rect.Z);
+                int x1 = Math.Min(g.Width - 1, z.Rect.MaxX), z1 = Math.Min(g.Height - 1, z.Rect.MaxZ);
+                if (x1 < x0 || z1 < z0) return ToolOutcome.Error("zone " + z.Name + " is outside the map");
+                z.Rect = new Rect(x0, z0, x1 - x0 + 1, z1 - z0 + 1);
+                list.Add(z);
+            }
+            if (list.Count == 0) return ToolOutcome.Error("give at least one zone");
+            Zones.Clear();
+            Zones.AddRange(list);
+            var report = new JArray();
+            foreach (var z in Zones) report.Add(ZoneReport(z));
+            return ToolOutcome.Ok(new JObject().Set("zones", report).Set("zone_fit", ZoneFit())
+                .Set("next", "fill each zone with place_group (largest district first), then route_network apply=true"));
+        }
+
+        private JObject ZoneReport(Zone z)
+        {
+            var g = Draft.Grid;
+            int land = 0, free = 0, water = 0;
+            double fert = 0, slope = 0; int fertN = 0;
+            foreach (var c in z.Rect.Cells())
+            {
+                int i = g.Idx(c);
+                if (g.Terrain[i] == Terrain.Water) { water++; continue; }
+                if (g.Terrain[i] != Terrain.Land) continue;
+                land++;
+                slope += g.Slope[i];
+                if (!float.IsNaN(g.Fertility[i])) { fert += g.Fertility[i]; fertN++; }
+                if (Draft.OwnerAt(c) == null) free++;
+            }
+            var inside = Draft.LiveBuildings.Where(b => z.Rect.Contains(b.Center) && b.Category != "wall")
+                .GroupBy(b => b.Category).OrderBy(x => x.Key, StringComparer.Ordinal)
+                .Aggregate(new JObject(), (o, grp) => o.Set(grp.Key, grp.Count()));
+            return z.ToJson().Set("land_tiles", land).Set("free_tiles", free).Set("water_tiles", water)
+                .Set("avg_fertility", fertN == 0 ? null : (object)Math.Round(fert / fertN, 2))
+                .Set("avg_slope_deg", land == 0 ? null : (object)Math.Round(slope / land, 1))
+                .Set("buildings_inside", inside)
+                .Set("fields_inside", Draft.Fields.Count(f => z.Rect.Contains(f.Rect.Center)));
+        }
+
+        /// <summary>Share of buildings that stand in a zone meant for their category (zones of purpose mixed accept all).</summary>
+        private JObject ZoneFit()
+        {
+            if (Zones.Count == 0) return new JObject().Set("note", "no zones set");
+            int total = 0, fit = 0;
+            var misplaced = new JArray();
+            foreach (var b in Draft.LiveBuildings)
+            {
+                if (b.Category == "wall" || b.Category == "gate" || b.Category == "town_center") continue;
+                var zone = Zones.FirstOrDefault(z => z.Rect.Contains(b.Center));
+                if (zone == null) continue;
+                total++;
+                var cats = Zone.Categories(zone.Purpose);
+                if (cats == null || cats.Contains(b.Category)) fit++;
+                else if (misplaced.Count < 25) misplaced.Add(b.Id + " (" + b.Category + ") in " + zone.Name + " (" + zone.Purpose + ")");
+            }
+            return new JObject().Set("buildings_in_zones", total).Set("fitting", fit)
+                .Set("fit_ratio", total == 0 ? null : (object)Math.Round((double)fit / total, 2)).Set("misplaced", misplaced);
+        }
+
+        // ------------------------------------------------------------------ district placement
+
+        private sealed class GroupEntry
+        {
+            public string Op;          // build | relocate
+            public string Target;      // type for build, id for relocate
+            public string Type;
+            public string Role = "member";
+            public BuildingSpec Spec;
+            public int PreferredRot = -1;
+        }
+
+        private JObject Template(string name) => string.IsNullOrEmpty(name) ? null : _snap.Knowledge.Districts.Obj(name);
+
+        private static bool Matches(JObject tpl, string key, string type, string category)
+        {
+            foreach (var m in tpl?.Arr(key)?.Strings() ?? new List<string>())
+            {
+                if (string.Equals(m, type, StringComparison.OrdinalIgnoreCase) || string.Equals(m, category, StringComparison.OrdinalIgnoreCase)) return true;
+                if (m.StartsWith("category:", StringComparison.OrdinalIgnoreCase) && string.Equals(m.Substring(9), category, StringComparison.OrdinalIgnoreCase)) return true;
+                if (m.EndsWith("*") && type != null && type.StartsWith(m.TrimEnd('*'), StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
+        private ToolOutcome PlaceGroup(JObject input, CancellationToken cancel)
+        {
+            Rect area;
+            Zone zone = null;
+            string zoneName = input.Str("zone");
+            if (!string.IsNullOrEmpty(zoneName))
+            {
+                zone = Zones.FirstOrDefault(z => string.Equals(z.Name, zoneName, StringComparison.OrdinalIgnoreCase));
+                if (zone == null) return ToolOutcome.Error("unknown zone '" + zoneName + "'" + (Zones.Count == 0 ? "; call set_zones first" : "; zones: " + string.Join(", ", Zones.Select(z => z.Name))));
+                area = zone.Rect;
+            }
+            else if (!Rect.TryParse(input["area"], out area)) return ToolOutcome.Error("give zone (a name from set_zones) or area [x,z,w,h]");
+
+            var districts = _snap.Knowledge.Districts;
+            string tplName = input.Str("template");
+            if (string.IsNullOrEmpty(tplName) && zone != null)
+                tplName = districts.Keys.FirstOrDefault(k => string.Equals(districts.Obj(k)?.Str("purpose"), zone.Purpose, StringComparison.OrdinalIgnoreCase) && districts.Obj(k).Bool("default"));
+            if (!string.IsNullOrEmpty(tplName) && Template(tplName) == null)
+                return ToolOutcome.Error("unknown template '" + tplName + "'; templates: " + string.Join(", ", districts.Keys));
+            bool apply = !input.ContainsKey("apply") || input.Bool("apply");
+
+            // ---- what to place
+            var entries = new List<GroupEntry>();
+            var problems = new JArray();
+            var k = _snap.Knowledge;
+            var taken = new HashSet<string>();
+            foreach (var item in input.Arr("items").Objects())
+            {
+                int rot = item.ContainsKey("rot") ? item.Int("rot") & 3 : -1;
+                var ids = new List<string>();
+                var mv = item["move"];
+                if (mv is string one) ids.Add(one);
+                else if (mv is JArray many) ids.AddRange(many.Strings());
+                string moveType = item.Str("move_type");
+                if (moveType != null)
+                {
+                    int n = Math.Max(1, item.Int("count", 1000));
+                    var c = area.Center;
+                    ids.AddRange(Draft.LiveBuildings.Where(b => string.Equals(b.Type, moveType, StringComparison.OrdinalIgnoreCase) && !b.Locked && !_s.LockedIds.Contains(b.Id) && !taken.Contains(b.Id))
+                        .OrderByDescending(b => b.Center.DistanceTo(c)).Take(n).Select(b => b.Id));
+                    if (ids.Count == 0) problems.Add("no movable " + moveType + " found");
+                }
+                foreach (var id in ids)
+                {
+                    BuildingInfo b;
+                    if (!Draft.Buildings.TryGetValue(id, out b) || Draft.Demolished.Contains(id)) { problems.Add("unknown building " + id); continue; }
+                    if (!taken.Add(b.Id)) continue;
+                    entries.Add(new GroupEntry { Op = Ops.Relocate, Target = b.Id, Type = b.Type, Spec = k.Spec(b.Type), PreferredRot = rot });
+                }
+                string type = item.Str("type");
+                if (type != null)
+                {
+                    int n = Math.Max(1, Math.Min(60, item.Int("count", 1)));
+                    if (!k.Buildings.ContainsKey(type)) { problems.Add("unknown building type " + type); continue; }
+                    for (int i = 0; i < n; i++) entries.Add(new GroupEntry { Op = Ops.Build, Target = type, Type = type, Spec = k.Spec(type), PreferredRot = rot });
+                }
+            }
+            if (entries.Count == 0) return ToolOutcome.Error("nothing to place" + (problems.Count > 0 ? ": " + string.Join("; ", problems.Strings()) : "; items need type+count, move or move_type"));
+            if (entries.Count > 150) return ToolOutcome.Error("at most 150 buildings per call (got " + entries.Count + "); split the district");
+
+            if (string.IsNullOrEmpty(tplName))
+            {
+                // no zone and no template: the default template for what is mostly being placed
+                string purpose = PurposeOf(entries.GroupBy(e => e.Spec.Category).OrderByDescending(x => x.Count()).First().Key);
+                tplName = districts.Keys.FirstOrDefault(k2 => string.Equals(districts.Obj(k2)?.Str("purpose"), purpose, StringComparison.OrdinalIgnoreCase) && districts.Obj(k2).Bool("default"));
+            }
+            var tpl = Template(tplName);
+            int spacing = Math.Max(0, Math.Min(3, input.Int("spacing", tpl?.Int("spacing", 1) ?? 1)));
+            foreach (var e in entries)
+            {
+                string cat = e.Spec.Category;
+                e.Role = Matches(tpl, "hub", e.Type, cat) ? "hub" : Matches(tpl, "edge", e.Type, cat) ? "edge" : Matches(tpl, "away", e.Type, cat) ? "away" : "member";
+            }
+            int RoleOrder(string r) => r == "hub" ? 0 : r == "member" ? 1 : r == "edge" ? 2 : 3;
+            entries = entries.OrderBy(e => RoleOrder(e.Role)).ThenByDescending(e => e.Spec.W * e.Spec.H).ToList();
+
+            // ---- reference points
+            Cell anchor;
+            if (!TryPoint(input["anchor"], out anchor)) anchor = area.Center;
+            var tc = Draft.LiveBuildings.FirstOrDefault(b => b.Category == "town_center");
+            var edgePoint = tc == null ? anchor : new Cell(Math.Max(area.X, Math.Min(area.MaxX, tc.Center.X)), Math.Max(area.Z, Math.Min(area.MaxZ, tc.Center.Z)));
+            var houses = Draft.LiveBuildings.Where(b => b.Category == "housing" && !area.Contains(b.Center)).ToList();
+            Cell? housingCentre = houses.Count == 0 ? (Cell?)null : new Cell((int)houses.Average(h => h.Center.X), (int)houses.Average(h => h.Center.Z));
+
+            var target = apply ? Draft : Draft.Fork(_s);
+            double before = new Scorer(_s).Score(target).Weighted;
+            string objective = input.Str("objective") ?? ObjectiveFor(zone?.Purpose ?? tpl?.Str("purpose"));
+            string rationale = input.Str("rationale") ?? ((tplName ?? "district") + " layout in " + (zone?.Name ?? area.ToString()));
+            int group = ++_groupCounter;
+            var hubs = new List<BuildingInfo>();
+            var placed = new JArray();
+            var kept = new JArray();
+            var unplaced = new JArray();
+            var pending = entries;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int seq = 0;
+            // relocations inside a packed district can block each other: retry the leftovers twice
+            for (int pass = 0; pass < 3 && pending.Count > 0; pass++)
+            {
+                var retry = new List<GroupEntry>();
+                foreach (var e in pending)
+                {
+                    cancel.ThrowIfCancellationRequested();
+                    if (sw.Elapsed.TotalSeconds > 25) { retry.Add(e); continue; }
+                    string why;
+                    var act = PlaceOne(target, e, area, spacing, anchor, edgePoint, housingCentre, hubs, out why);
+                    if (act == null)
+                    {
+                        if (why == "kept") { kept.Add(e.Target); var kb = target.Buildings[e.Target]; if (e.Role == "hub") hubs.Add(kb); continue; }
+                        if (pass < 2) retry.Add(e); else unplaced.Add(new JObject().Set("item", e.Target).Set("reason", why));
+                        continue;
+                    }
+                    act.Id = "g" + group + "_" + (++seq);
+                    act.Objective = objective;
+                    act.Rationale = rationale;
+                    var r = target.Apply(act, _s);
+                    if (!r.Valid) { if (pass < 2) retry.Add(e); else unplaced.Add(new JObject().Set("item", e.Target).Set("reason", string.Join("; ", r.Reasons))); continue; }
+                    string newId = act.Op == Ops.Build ? r.NewId : act.Target;
+                    if (e.Role == "hub" && newId != null && target.Buildings.ContainsKey(newId)) hubs.Add(target.Buildings[newId]);
+                    placed.Add(new JObject().Set("id", act.Id).Set("op", act.Op).Set("target", act.Target).Set("building", newId).Set("role", e.Role)
+                        .Set("rect", r.Footprint?.ToJson()));
+                }
+                if (sw.Elapsed.TotalSeconds > 25 && retry.Count > 0)
+                {
+                    foreach (var e in retry) unplaced.Add(new JObject().Set("item", e.Target).Set("reason", "time limit for one call; place the rest with another place_group"));
+                    retry.Clear();
+                }
+                pending = retry;
+            }
+            double after = new Scorer(_s).Score(target).Weighted;
+            if (apply) { _applyCalls++; _scoreHistory.Add(after); }
+            var o = new JObject().Set("applied", apply).Set("template", tplName).Set("area", area.ToJson()).Set("spacing", spacing)
+                .Set("placed", placed).Set("kept_in_place", kept).Set("unplaced", unplaced)
+                .Set("weighted_before", Math.Round(before, 2)).Set("weighted_after", Math.Round(after, 2)).Set("delta", Math.Round(after - before, 2))
+                .Set("relocations_used", target.RelocationCount).Set("relocation_limit", _s.MaxRelocations < 0 ? "unlimited" : (object)_s.MaxRelocations);
+            if (problems.Count > 0) o.Set("problems", problems);
+            if (Zones.Count > 0) o.Set("zone_fit", ZoneFit());
+            if (apply && after < before - 0.01) o.Set("hint", "the group lowers the score; undo_draft removes its actions one by one, or try another area/template");
+            else o.Set("hint", "next: the other districts, then route_network apply=true, then submit_plan auto_phases=true");
+            string text = Json.Write(o);
+            if (text.Length > 60000) text = text.Substring(0, 60000) + "…";
+            return ToolOutcome.Ok(text);
+        }
+
+        private static string PurposeOf(string category)
+        {
+            switch (category)
+            {
+                case "housing": return "housing";
+                case "storage": return "storage";
+                case "production":
+                case "resource": return "industry";
+                case "farm":
+                case "food": return "farming";
+                case "defence":
+                case "wall":
+                case "gate": return "defence";
+                default: return "services";
+            }
+        }
+
+        private static string ObjectiveFor(string purpose)
+        {
+            switch (purpose)
+            {
+                case "farming": return "O1";
+                case "industry":
+                case "storage": return "O2";
+                case "housing":
+                case "services": return "O3";
+                case "defence": return "O5";
+                default: return "O2";
+            }
+        }
+
+        /// <summary>
+        /// Best position in the area for one entry, by its template role: hubs nearest the anchor,
+        /// members nearest a hub (inside its service radius when possible), edge buildings nearest the
+        /// side facing the Town Center, polluters farthest from the village's housing. Null with
+        /// why = "kept" when a relocated building already stands about as well as it could.
+        /// </summary>
+        private PlanAction PlaceOne(DraftLayout d, GroupEntry e, Rect area, int spacing, Cell anchor, Cell edgePoint, Cell? housing,
+            List<BuildingInfo> hubs, out string why)
+        {
+            why = "no free site in the area";
+            int w = e.Spec.W, h = e.Spec.H;
+            BuildingInfo self = null;
+            if (e.Op == Ops.Relocate) { d.Buildings.TryGetValue(e.Target, out self); if (self != null) { w = self.W; h = self.H; } }
+            int sp = e.Spec.Category == "decoration" ? 0 : spacing;
+            Func<Rect, double> score = rect =>
+            {
+                var c = rect.Center;
+                switch (e.Role)
+                {
+                    case "hub": return c.DistanceTo(anchor);
+                    case "edge": return c.DistanceTo(edgePoint);
+                    case "away": return housing.HasValue ? -c.DistanceTo(housing.Value) : c.DistanceTo(anchor);
+                    default:
+                        if (hubs.Count == 0) return c.DistanceTo(anchor);
+                        double best = double.MaxValue;
+                        foreach (var hb in hubs)
+                        {
+                            double dist = c.DistanceTo(hb.Center);
+                            if (hb.ServiceRadius > 0 && dist > hb.ServiceRadius) dist += 40; // outside the hub's catchment
+                            best = Math.Min(best, dist);
+                        }
+                        return best;
+                }
+            };
+            var rots = e.PreferredRot >= 0 ? new[] { e.PreferredRot } : new[] { 0, 1, 2, 3 };
+            var cands = new List<KeyValuePair<double, int[]>>();
+            foreach (int rot in rots)
+            {
+                int rw = (rot & 1) == 1 ? h : w, rh = (rot & 1) == 1 ? w : h;
+                for (int z = area.Z; z + rh - 1 <= area.MaxZ; z++)
+                    for (int x = area.X; x + rw - 1 <= area.MaxX; x++)
+                        cands.Add(new KeyValuePair<double, int[]>(score(new Rect(x, z, rw, rh)) + rot * 0.001, new[] { x, z, rot }));
+            }
+            cands.Sort((a, b) => a.Key.CompareTo(b.Key));
+            double current = double.MaxValue;
+            if (self != null && area.Contains(self.Center)) current = score(self.Footprint);
+            int checks = 0;
+            foreach (var cand in cands)
+            {
+                if (self != null && cand.Key >= current - 1.5) { why = "kept"; return null; }
+                if (++checks > 4000) { why = "no valid site among the 4000 best positions"; break; }
+                int x = cand.Value[0], z = cand.Value[1], rot = cand.Value[2];
+                int rw = (rot & 1) == 1 ? h : w, rh = (rot & 1) == 1 ? w : h;
+                var rect = new Rect(x, z, rw, rh);
+                if (sp > 0 && !Clearance(d, rect, sp, e.Target)) continue;
+                var a = new PlanAction { Op = e.Op, Target = e.Target, Params = new JObject().Set("x", x).Set("z", z).Set("rot", rot) };
+                var r = d.Check(a, _s);
+                if (!r.Valid)
+                {
+                    // limits are not position problems: stop at once
+                    var reason = string.Join("; ", r.Reasons);
+                    if (reason.Contains("limit") || reason.Contains("locked") || reason.Contains("ambition") || reason.Contains("bound to") || reason.Contains("not allowed")) { why = reason; return null; }
+                    continue;
+                }
+                return a;
+            }
+            if (self != null && current < double.MaxValue) { why = "kept"; return null; }
+            return null;
+        }
+
+        /// <summary>No other building within <paramref name="ring"/> tiles of the rect (roads and fields are fine).</summary>
+        private static bool Clearance(DraftLayout d, Rect rect, int ring, string self)
+        {
+            for (int i = 1; i <= ring; i++)
+                foreach (var c in DraftLayout.Border(rect, i))
+                {
+                    var owner = d.OwnerAt(c);
+                    if (owner == null || owner == self || owner.StartsWith("field:")) continue;
+                    if (owner == "edge") return false;
+                    BuildingInfo b;
+                    if (d.Buildings.TryGetValue(owner, out b) && (b.Category == "wall" || b.Category == "gate")) continue;
+                    return false;
+                }
+            return true;
+        }
+
+        // ------------------------------------------------------------------ submit
+
+        private static string StageName(Stage st)
+        {
+            switch (st)
+            {
+                case Stage.Settings: return "Settings";
+                case Stage.Prepare: return "Prepare";
+                case Stage.AddCapacity: return "Add capacity";
+                case Stage.StorageLogistics: return "Storage and logistics";
+                case Stage.ProductionChains: return "Production chains";
+                case Stage.Farming: return "Farming";
+                case Stage.Residential: return "Residential and services";
+                default: return "Clean-up";
+            }
+        }
+
+        /// <summary>
+        /// Phases from draft actions: by standard stage order (byStage) or in draft order, split at
+        /// the max actions per phase and wherever the offline cap for a tier 1-2 type would be passed.
+        /// Road actions stay with the district they follow.
+        /// </summary>
+        private List<Phase> AutoPhases(List<PlanAction> actions, bool byStage)
+        {
+            var k = _snap.Knowledge;
+            var keyed = new List<Tuple<Stage, int, PlanAction>>();
+            Stage last = Stage.Prepare;
+            for (int i = 0; i < actions.Count; i++)
+            {
+                var a = actions[i];
+                Stage st;
+                if (a.Op == Ops.RoadRemove) st = Stage.CleanUp;
+                else if (a.Op == Ops.RoadAdd) st = byStage ? Stage.Prepare : last;
+                else { st = a.Stage(k, _snap); last = st; }
+                keyed.Add(Tuple.Create(st, i, a));
+            }
+            var ordered = byStage ? keyed.OrderBy(t => t.Item1).ThenBy(t => t.Item2).ToList() : keyed;
+            var totals = Draft.Snapshot.Buildings.GroupBy(b => b.Type).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+            var phases = new List<Phase>();
+            Phase cur = null;
+            Stage curStage = 0;
+            var offline = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var perStage = new Dictionary<Stage, int>();
+            foreach (var t in ordered)
+            {
+                var a = t.Item3;
+                bool split = cur == null || cur.Actions.Count >= _s.PhaseMaxActions || (byStage && t.Item1 != curStage);
+                string offType = null;
+                if ((a.Op == Ops.Relocate || a.Op == Ops.Demolish) && a.Target != null)
+                {
+                    var b = _snap.Building(a.Target);
+                    if (b != null && k.IsTierOneTwo(b.Type))
+                    {
+                        offType = b.Type;
+                        int total; totals.TryGetValue(b.Type, out total);
+                        int allowed = Math.Max(1, (int)Math.Floor(_s.OfflineCap * total));
+                        int n; offline.TryGetValue(b.Type, out n);
+                        if (!split && n + 1 > allowed) split = true;
+                    }
+                }
+                if (split)
+                {
+                    curStage = t.Item1;
+                    int idx; perStage.TryGetValue(curStage, out idx); perStage[curStage] = ++idx;
+                    cur = new Phase { Name = StageName(curStage) + (idx > 1 ? " " + idx : ""), Goal = "" };
+                    phases.Add(cur);
+                    offline.Clear();
+                }
+                cur.Actions.Add(a);
+                if (offType != null) { int n; offline.TryGetValue(offType, out n); offline[offType] = n + 1; }
+            }
+            if (!byStage)
+                foreach (var p in phases)
+                {
+                    var main = p.Actions.Where(a => a.Op != Ops.RoadAdd && a.Op != Ops.RoadRemove).Select(a => a.Stage(k, _snap)).DefaultIfEmpty(Stage.Prepare)
+                        .GroupBy(x => x).OrderByDescending(g => g.Count()).First().Key;
+                    p.Name = StageName(main) + " (draft order)";
+                }
+            return phases;
+        }
+
+        private static PlanAction Clone(PlanAction a) => PlanAction.FromJson(a.ToJson());
+
         private ToolOutcome SubmitPlan(JObject input)
         {
+            bool auto = input.Bool("auto_phases");
+            var newActions = Draft.Applied.Skip(_priorActions).Select(Clone).ToList();
+            // resolve "action_ids" against the applied draft actions
+            if (!auto)
+            {
+                var phasesIn = input.Arr("phases");
+                if (phasesIn == null || phasesIn.Count == 0) return ToolOutcome.Error("give phases, or auto_phases: true to let the mod build them");
+                var byId = new Dictionary<string, PlanAction>(StringComparer.Ordinal);
+                foreach (var a in Draft.Applied) byId[a.Id] = a;
+                foreach (var p in phasesIn.Objects())
+                {
+                    var ids = p.Arr("action_ids");
+                    if (ids == null || ids.Count == 0) continue;
+                    var acts = p.Arr("actions") ?? new JArray();
+                    foreach (var id in ids.Strings())
+                    {
+                        PlanAction a;
+                        if (!byId.TryGetValue(id, out a)) return ToolOutcome.Error("action_ids: '" + id + "' is not an applied draft action");
+                        acts.Add(a.ToJson());
+                    }
+                    p.Set("actions", acts);
+                }
+            }
             ArchitectPlan plan;
             try { plan = ArchitectPlan.FromJson(input); }
             catch (Exception e) { return ToolOutcome.Error("could not read the plan: " + e.Message); }
             plan.Ambition = _s.Ambition;
-            var v = new PlanValidator(_s, _foodMonths, _woodMonths).Validate(plan, _snap);
+            plan.Zones = new List<Zone>(Zones);
+            if (auto)
+            {
+                if (newActions.Count == 0 && _priorPhases.Count == 0) return ToolOutcome.Error("the draft has no actions to phase");
+                plan.Phases = AutoPhases(newActions, true);
+            }
+            var prior = _priorPhases.Select(p => Phase.FromJson(p.ToJson())).ToList();
+            plan.Phases.Sort((a, b) => a.N.CompareTo(b.N));
+            plan.Phases.InsertRange(0, prior);
+            for (int i = 0; i < plan.Phases.Count; i++) plan.Phases[i].N = i + 1;
+
+            var validator = new PlanValidator(_s, _foodMonths, _woodMonths);
+            var v = validator.Validate(plan, _snap);
+            if (!v.Ok && auto)
+            {
+                // the standard order can break dependencies between districts: keep the draft order instead
+                var alt = ArchitectPlan.FromJson(plan.ToJson());
+                alt.Zones = plan.Zones;
+                alt.Phases = prior.Select(p => Phase.FromJson(p.ToJson())).ToList();
+                alt.Phases.AddRange(AutoPhases(newActions.Select(Clone).ToList(), false));
+                for (int i = 0; i < alt.Phases.Count; i++) alt.Phases[i].N = i + 1;
+                var v2 = new PlanValidator(_s, _foodMonths, _woodMonths) { StageOrderIsWarning = true }.Validate(alt, _snap);
+                if (v2.Ok)
+                {
+                    v2.Warnings.Insert(0, "auto-phases keep the draft order (the standard stage order would break: " + string.Join("; ", v.Errors.Take(3)) + ")");
+                    plan = alt; v = v2;
+                }
+            }
             LastValidation = v;
             if (!v.Ok)
             {
                 var o = new JObject().Set("accepted", false).Set("errors", v.Errors.Take(30).ToJArray())
                     .Set("warnings", v.Warnings.Take(15).ToJArray())
-                    .Set("hint", "Fix the errors (use check_placement / route_network) and call submit_plan again with the whole plan.");
+                    .Set("hint", auto
+                        ? "Fix the draft (undo_draft, place_group, route_network) and submit again with auto_phases: true."
+                        : "Fix the errors (use check_placement / route_network) and call submit_plan again with the whole plan.");
                 return new ToolOutcome { Content = Json.Write(o), IsError = true };
             }
             plan.Warnings = v.Warnings.Take(50).ToList();
             AcceptedPlan = plan;
             return new ToolOutcome
             {
-                Content = Json.Write(new JObject().Set("accepted", true).Set("score_before", plan.ScoreBefore).Set("score_after", plan.ScoreAfter)),
+                Content = Json.Write(new JObject().Set("accepted", true).Set("phases", plan.Phases.Count).Set("actions", plan.AllActions().Count())
+                    .Set("score_before", plan.ScoreBefore).Set("score_after", plan.ScoreAfter)),
                 Finished = true,
                 Payload = new KeyValuePair<ArchitectPlan, PlanValidation>(plan, v)
             };
