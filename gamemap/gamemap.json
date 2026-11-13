@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "_about": "How Frontier Architect reaches Farthest Frontier's internals (Mono build). Names were seeded from community mods and must be confirmed on the current game build (milestone M0): run Settings > Diagnostics > Run probe, then complete this file. Ops stay 'unmapped' (shown as Manual) until a recipe exists, and 'experimental' until tested in game. Execute stays off until mapped_game_version equals the running game version. v1.1.2a names confirmed from a player's probe report (Nov 2026).",
-  "mapped_game_version": "",
+  "_about": "How Frontier Architect reaches Farthest Frontier's internals (Mono build). Mapped against the decompiled Assembly-CSharp of v1.1.2a (Mono): every type, member and method below exists in that build and the op recipes follow the game's own code paths (Input_PlaceBuilding, Input_RelocateObject, Building.OnDeleteConfirmed, CropfieldScheduler, ResourceManager item infos, SaveManager, CESceneManager). Ops stay 'experimental' until tested in game (Settings > Diagnostics); Execute stays off on any other game version.",
+  "mapped_game_version": "v1.1.2a (Mono)",
   "scene": "Frontier",
   "grid": {
     "_help": "Farthest Frontier v1.1.x: no Unity Terrain; a fixed grid of 5-unit cells (384 per side, the size of the fertility map; 0 = detect), ground picked on the ClickCubes layer, water on Water, roads on Roads, sea level from the terrain manager. water_height overrides the sea level; ground_name/origin are fallbacks.",
@@ -33,11 +33,7 @@
       "AgricultureManager"
     ],
     "CombatManager": [
-      "CombatManager",
-      "RaidManager"
-    ],
-    "RaidManager": [
-      "RaidManager"
+      "CombatManager"
     ],
     "BuildManager": [
       "BuildManager"
@@ -61,16 +57,7 @@
       "Villager"
     ],
     "Field": [
-      "FarmField",
-      "Field",
-      "CropField",
-      "FarmPlot"
-    ],
-    "Road": [
-      "Road",
-      "RoadSegment",
-      "RoadPiece",
-      "RoadTile"
+      "Cropfield"
     ],
     "NaturalResource": [
       "TreeResource",
@@ -85,6 +72,9 @@
     "TerrainManager": [
       "Terrain2Manager",
       "TerrainManager"
+    ],
+    "CESceneManager": [
+      "CESceneManager"
     ]
   },
   "members": {
@@ -100,11 +90,6 @@
       "settlementName",
       "townName",
       "villageName"
-    ],
-    "game.town_tier": [
-      "townTier",
-      "currentTownTier",
-      "townCenterTier"
     ],
     "time.year": [
       "year",
@@ -127,21 +112,6 @@
       "dayOfYear",
       "Day"
     ],
-    "time.season_progress": [
-      "seasonProgress",
-      "seasonPercent",
-      "seasonProgress01"
-    ],
-    "weather.frozen": [
-      "isGroundFrozen",
-      "groundFrozen",
-      "isFreezing"
-    ],
-    "raid.active": [
-      "isRaidActive",
-      "raidInProgress",
-      "raidActive"
-    ],
     "agriculture.fertility": [
       "cachedFertilityData",
       "fertilityData",
@@ -160,10 +130,8 @@
       "unlockTier"
     ],
     "building_data.cost": [
-      "buildingMaterials",
-      "constructionCost",
-      "buildCost",
-      "cost"
+      "GetRequiredMaterialsDict()",
+      "buildingMaterials"
     ],
     "building_data.build_time": [
       "workRequiredToConstruct",
@@ -198,22 +166,15 @@
       "maxEmployees"
     ],
     "building.work_radius": [
-      "workRadius",
-      "circleRadius",
-      "foragingRadius",
-      "huntingRadius",
-      "gatherRadius"
+      "<WorkArea>.GetRadius()",
+      "circleRadius"
     ],
     "building.work_center": [
-      "workCircleCenter",
-      "circleCenter",
-      "workAreaCenter"
+      "<WorkArea>.GetCenter()"
     ],
     "building.service_radius": [
-      "serviceRadius",
-      "influenceRadius",
-      "coverageRadius",
-      "effectRadius"
+      "strategicPlanningRadius",
+      "circleRadius"
     ],
     "building.paused": [
       "isPaused",
@@ -254,10 +215,7 @@
     ],
     "villager.profession": [
       "occupation.occupation",
-      "occupation.type",
-      "occupation.currentOccupation",
-      "occupation",
-      "profession"
+      "occupation"
     ],
     "villager.age": [
       "CalculateAgeInYears()",
@@ -265,45 +223,16 @@
       "ageInYears"
     ],
     "field.fertility": [
-      "fertility",
-      "averageFertility",
-      "soilFertility"
+      "GetFertility()"
     ],
     "field.weeds": [
-      "weeds",
-      "weedLevel",
-      "weediness"
+      "GetWeedLevel()"
     ],
     "field.rocks": [
-      "rocks",
-      "rockiness",
-      "rockLevel"
-    ],
-    "field.rotation": [
-      "cropRotation",
-      "rotation",
-      "rotationCrops"
-    ],
-    "field.current_year": [
-      "rotationYear",
-      "currentRotationIndex",
-      "currentYear"
-    ],
-    "field.crop_in_ground": [
-      "currentCrop",
-      "plantedCrop",
-      "cropInGround"
+      "GetRockiness()"
     ],
     "field.diseases": [
-      "diseases",
-      "soilDiseases",
-      "presentDiseases"
-    ],
-    "road.points": [
-      "points",
-      "tiles",
-      "pathPoints",
-      "nodes"
+      "GetDiseases()"
     ],
     "resource.type": [
       "buildingDataIdentifier",
@@ -335,144 +264,247 @@
       "maxWorkers"
     ],
     "building.workers_desired": [
-      "_userDefinedMaxWorkers",
-      "userDefinedMaxWorkers"
+      "userDefinedMaxWorkers",
+      "_userDefinedMaxWorkers"
     ],
     "building.work_enabled": [
-      "_playerDesiresWorkEnabled",
       "playerDesiresWorkEnabled",
-      "_workEnabled"
+      "_playerDesiresWorkEnabled"
     ],
     "villager.workplace": [
       "_placeOfWork",
       "placeOfWork",
       "workplace"
+    ],
+    "resource_manager.item_infos": [
+      "itemNameToItemInfoDict"
+    ],
+    "resource_manager.food_months": [
+      "estimatedMonthsOfFoodLeft"
+    ],
+    "resource_manager.food_total": [
+      "totalUnusedFoodCount"
+    ],
+    "resource_manager.villager_count": [
+      "villagerCount"
+    ],
+    "item_info.count": [
+      "count"
+    ],
+    "time.date": [
+      "currentDate"
+    ],
+    "field.soil": [
+      "GetSoilMixture()"
+    ],
+    "field.workers": [
+      "allocatedWorkers"
     ]
   },
   "ops": {
     "set_workers": {
       "status": "experimental",
-      "note": "v1.1.2a: Building._userDefinedMaxWorkers is the player's worker limit (the UI +/-). Setting the field may not refresh the game's job assignment; test with Settings > Diagnostics > set_workers.",
+      "note": "Resource.userDefinedMaxWorkers setter: validates 0..maxWorkers and notifies the game (OnUserDefinedMaxWorkersUpdated), as the UI +/- does.",
       "native": [
         {
-          "set": "building._userDefinedMaxWorkers",
+          "set": "building.userDefinedMaxWorkers",
           "value": "$count"
         }
       ],
       "instant": "same",
       "verify": {
-        "member": "building._userDefinedMaxWorkers",
+        "member": "building.userDefinedMaxWorkers",
         "equals": "$count",
-        "timeout_seconds": 30
+        "timeout_seconds": 20
       }
     },
     "set_paused": {
       "status": "experimental",
-      "note": "v1.1.2a: Building._playerDesiresWorkEnabled is the player's work toggle (false = paused).",
+      "note": "Building.SetWorkEnabled(value, isPlayerDecision: true), the work toggle's code path.",
       "native": [
         {
-          "set": "building._playerDesiresWorkEnabled",
-          "value": "$work_enabled"
+          "call": "building.SetWorkEnabled",
+          "args": [
+            "$work_enabled",
+            true
+          ]
         }
       ],
       "instant": "same",
       "verify": {
-        "member": "building._playerDesiresWorkEnabled",
+        "member": "building.playerDesiresWorkEnabled",
         "equals": "$work_enabled",
-        "timeout_seconds": 10
+        "timeout_seconds": 20
       }
     },
-    "set_production_limit": {
-      "status": "unmapped"
-    },
-    "set_profession_target": {
-      "status": "unmapped"
-    },
-    "set_rotation": {
-      "status": "unmapped"
-    },
     "set_work_circle": {
-      "status": "unmapped"
-    },
-    "build": {
-      "status": "unmapped",
-      "note": "Community mods call BuildManager.Construct(...) returning a GameObject; confirm its parameters with the probe.",
+      "status": "experimental",
+      "note": "WorkArea.SetCenterPoint(world position) on the building's WorkArea component.",
       "native": [
         {
-          "call": "BuildManager.Construct",
+          "call": "building.<WorkArea>.SetCenterPoint",
           "args": [
-            "$prefab",
-            "$world_pos",
-            "$rotation"
+            "$world_pos"
           ]
         }
       ],
+      "instant": "same",
+      "verify": {
+        "builtin": "work_center_at",
+        "timeout_seconds": 20
+      }
+    },
+    "set_production_limit": {
+      "status": "experimental",
+      "note": "ResourceManager.itemNameToItemInfoDict[item]: maxQuota = limit, areProductionLimitsEnabled = limit > 0 (limit 0 removes it).",
+      "native": [
+        {
+          "builtin": "production_limit"
+        }
+      ],
+      "instant": "same",
+      "verify": {
+        "builtin": "production_limit",
+        "timeout_seconds": 20
+      }
+    },
+    "set_profession_target": {
+      "status": "dropped",
+      "note": "Farthest Frontier v1.1.x has no per-profession target: jobs follow each building's worker limit (use set_workers)."
+    },
+    "set_rotation": {
+      "status": "experimental",
+      "note": "Cropfield.cropScheduler: WipeScheduledItem then AttemptToAddCropToSchedule(year, crop record name) / AttemptToAddFieldWorkToSchedule for maintenance.",
+      "native": [
+        {
+          "builtin": "crop_rotation"
+        }
+      ],
+      "instant": "same",
+      "verify": {
+        "builtin": "rotation_is",
+        "timeout_seconds": 20
+      }
+    },
+    "build": {
+      "status": "experimental",
+      "note": "Input_PlaceBuilding.Place: ConstructionData(CONSTRUCT) -> BuildManager.Construct. Native queues a build site; Instant places the finished building.",
+      "native": [
+        {
+          "builtin": "construct"
+        }
+      ],
+      "instant": "same",
       "verify": {
         "builtin": "building_at_target"
       }
     },
     "relocate": {
-      "status": "unmapped",
+      "status": "experimental",
+      "note": "Input_RelocateObject: deconstruction + construction ConstructionData(RELOCATE) -> BuildManager.Relocate. Costs workRequiredToConstruct and goldRequiredToRelocate like the game.",
+      "native": [
+        {
+          "builtin": "relocate"
+        }
+      ],
+      "instant": "same",
       "verify": {
         "builtin": "building_at_target"
       }
     },
     "demolish": {
-      "status": "unmapped",
+      "status": "experimental",
+      "note": "Building.OnDeleteConfirmed: the delete button's salvage path (deconstruct site, refund).",
+      "native": [
+        {
+          "call": "building.OnDeleteConfirmed",
+          "args": []
+        }
+      ],
+      "instant": "same",
       "verify": {
         "builtin": "building_gone"
       }
     },
-    "clear_area": {
-      "status": "unmapped"
-    },
-    "flatten": {
-      "status": "unmapped"
-    },
-    "road_add": {
-      "status": "unmapped"
-    },
-    "road_remove": {
-      "status": "unmapped"
+    "field_remove": {
+      "status": "experimental",
+      "note": "Cropfield.OnConfirmDelete.",
+      "native": [
+        {
+          "call": "field.OnConfirmDelete",
+          "args": []
+        }
+      ],
+      "instant": "same",
+      "verify": {
+        "builtin": "field_gone"
+      }
     },
     "field_create": {
       "status": "unmapped",
+      "note": "Fields are placed through Input_PlaceCropfield with a TerrainGridData of valid cells; not mapped yet.",
       "verify": {
         "builtin": "field_present"
       }
     },
     "field_resize": {
-      "status": "unmapped"
-    },
-    "field_remove": {
       "status": "unmapped",
-      "verify": {
-        "builtin": "field_gone"
-      }
+      "note": "Cropfield.Expand / AddExpandedArea need a TerrainGridData; not mapped yet."
+    },
+    "road_add": {
+      "status": "unmapped",
+      "note": "Roads are spline/segment placements (BuildManager.BuildImmediateSegments); not mapped yet."
+    },
+    "road_remove": {
+      "status": "unmapped",
+      "note": "Road pieces are salvaged one by one; not mapped yet."
+    },
+    "clear_area": {
+      "status": "unmapped",
+      "note": "BuildManager.SelectTreesAndMarkToClear(rects, priority) exists; not mapped yet."
+    },
+    "flatten": {
+      "status": "unmapped",
+      "note": "Terrain smoothing runs inside construction; no standalone flatten; not mapped."
     }
   },
   "procedures": {
     "save": {
-      "status": "unmapped",
+      "status": "experimental",
+      "note": "SaveManager.Save(name, isHighMemoryAutoSave: false, isAutoSave: false); saving runs as a coroutine.",
       "steps": [
         {
-          "call": "SaveManager.SaveGame",
+          "call": "SaveManager.Save",
           "args": [
-            "$name"
+            "$name",
+            false,
+            false
           ]
         }
       ]
     },
     "load": {
-      "status": "unmapped",
+      "status": "experimental",
+      "note": "CESceneManager.LoadFromWithinGame(name): the in-game Load path (reloads the scene).",
       "steps": [
         {
-          "call": "SaveManager.LoadGame",
+          "call": "CESceneManager.LoadFromWithinGame",
           "args": [
             "$name"
           ]
         }
       ]
     }
+  },
+  "resources": {
+    "TreeResource": "tree",
+    "StoneResource": "stone",
+    "BushResource": "forage",
+    "ForageableResource": "forage",
+    "MineralDeposit": "ore"
+  },
+  "crops": {
+    "record_type": "VegetableFieldsRecord",
+    "disease_record_type": "CropDiseaseRecord"
   }
 }

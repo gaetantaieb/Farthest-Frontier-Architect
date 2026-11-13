@@ -3,6 +3,32 @@
 Every version listed here is published by the release workflow (`.github/workflows/release.yml`) when it reaches `main`.
 The in-game updater shows the section of the version it installs.
 
+## [0.3.0] - 2026-11-13
+
+Game map built from the decompiled Assembly-CSharp of Farthest Frontier v1.1.2a (Mono). Every type, member and
+method in `gamemap.json` was checked against that build; `mapped_game_version` is set, so Execute is available for
+the mapped ops once "Allow experimental ops" is ticked.
+
+Reading (exact game data):
+- Heights from `Terrain2Manager.GetHeightInWorldSpace`; the 5-unit cell grid matches `BuildManager.cellSize`.
+- Village stock from `ResourceManager.itemNameToItemInfoDict`; months of food from the game's own
+  `estimatedMonthsOfFoodLeft`; firewood from `firewoodItemInfo`; date from `TimeManager.currentDate`.
+- Crop fields (`Cropfield`): fertility, weeds, rockiness, soil mix, diseases, allocated farmers, and the real
+  3-year schedule from `cropScheduler`.
+- Crop table from the game's `VegetableFieldsRecord` data (fertility depletion, weed and fertility multipliers)
+  and `CropDiseaseRecord` (which crops each disease targets), replacing the estimates.
+- Natural resources: trees, stone, forage and mineral deposits (iron, gold, coal).
+- Building costs from `BuildingData.GetRequiredMaterialsDict()`; work circles from each building's `WorkArea`;
+  service radius from `strategicPlanningRadius`; villager jobs from `occupation`.
+
+Ops (experimental, following the game's code paths):
+- set_workers (`userDefinedMaxWorkers`), set_paused (`SetWorkEnabled`), set_work_circle (`WorkArea.SetCenterPoint`),
+  set_production_limit (item quota), set_rotation (crop scheduler), demolish (`OnDeleteConfirmed`),
+  field_remove (`Cropfield.OnConfirmDelete`), build (`BuildManager.Construct`), relocate (`BuildManager.Relocate`).
+- Auto-save (`SaveManager.Save`) and rollback (`CESceneManager.LoadFromWithinGame`).
+- set_profession_target dropped (the game has no such setting). Not mapped yet: field_create, field_resize,
+  road_add, road_remove, clear_area, flatten (they show as Manual).
+
 ## [0.2.0] - 2026-11-13
 
 Game reading rebuilt from a v1.1.2a (Mono) probe report.

@@ -26,7 +26,7 @@ namespace FrontierArchitect.Game
 
         public GameExecutor(GameAccess g, ModConfig cfg)
         {
-            _g = g; _cfg = cfg; _runner = new RecipeRunner(g.Map);
+            _g = g; _cfg = cfg; _runner = new RecipeRunner(g.Map, g);
         }
 
         private GameMap Map => _g.Map;
@@ -100,7 +100,7 @@ namespace FrontierArchitect.Game
             var grid = G();
             foreach (var c in _g.ObjectsOf("Field"))
             {
-                var b = GameAccess.WorldBounds(c);
+                var b = GameAccess.FieldBounds(c);
                 var min = grid.WorldToCell(b.min.x + 0.01f, b.min.z + 0.01f);
                 if ("field@" + min.X + "," + min.Z == id) return c;
             }
@@ -224,6 +224,7 @@ namespace FrontierArchitect.Game
             if (why != null) { error = why; return false; }
             var vars = Vars(a, out error);
             if (vars == null) return false;
+            vars["instant"] = mode == ExecMode.Instant;
             bool ok = _runner.Run(Map.Recipe(a.Op, mode == ExecMode.Instant), vars, out error);
             if (ok) _issuedAt[a.Id] = Time.realtimeSinceStartup;
             return ok;
@@ -251,6 +252,27 @@ namespace FrontierArchitect.Game
                         return uc is bool u && u ? OrderProgress.Pending : OrderProgress.Done;
                     }
                 case "building_gone": return FindBuilding(a.Target) == null ? OrderProgress.Done : OrderProgress.Pending;
+                case "production_limit":
+                    return Builtins.ProductionLimitIs(_g, a.Target, a.Params.Int("limit")) ? OrderProgress.Done : OrderProgress.Pending;
+                case "rotation_is":
+                    {
+                        var f = FindField(a.Target);
+                        if (f == null) return OrderProgress.Failed;
+                        var have = Builtins.ReadRotation(f);
+                        var want = a.Rotation();
+                        for (int y = 0; y < want.Count; y++)
+                            if (y >= have.Count || !want[y].Select(x => x.ToLowerInvariant()).SequenceEqual(have[y].Select(x => x.ToLowerInvariant()))) return OrderProgress.Pending;
+                        return OrderProgress.Done;
+                    }
+                case "work_center_at":
+                    {
+                        var b = FindBuilding(a.Target);
+                        var wa = b == null ? null : b.GetComponent(Reflect.FindType("WorkArea") ?? typeof(Transform));
+                        object c; string err;
+                        if (wa == null || Reflect.FindType("WorkArea") == null || !Reflect.Invoke(wa, "GetCenter", new object[0], out c, out err) || !(c is Vector3 cv)) return OrderProgress.Failed;
+                        var cell = G().WorldToCell(cv.x, cv.z);
+                        return Math.Abs(cell.X - a.X) <= 1 && Math.Abs(cell.Z - a.Z) <= 1 ? OrderProgress.Done : OrderProgress.Pending;
+                    }
                 case "field_gone": return FindField(a.Target) == null ? OrderProgress.Done : OrderProgress.Pending;
                 case "field_present":
                     {

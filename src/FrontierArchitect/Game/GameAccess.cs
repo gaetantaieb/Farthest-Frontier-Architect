@@ -186,6 +186,17 @@ namespace FrontierArchitect.Game
         public Dictionary<string, double> Stock()
         {
             var total = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            // v1.1.x: ResourceManager.itemNameToItemInfoDict holds the village-wide count per item
+            var registry = Member(Singleton("ResourceManager"), "resource_manager.item_infos") as IDictionary;
+            if (registry != null)
+            {
+                foreach (DictionaryEntry e in registry)
+                {
+                    double n = Reflect.Num(Reflect.Get(e.Value, "count"), double.NaN);
+                    if (!double.IsNaN(n) && n > 0) Add(total, Reflect.Text(e.Key), n);
+                }
+                if (total.Count > 0) return total;
+            }
             foreach (var b in ObjectsOf("StorageBuilding"))
             {
                 ReadItems(b, total);
@@ -204,6 +215,14 @@ namespace FrontierArchitect.Game
             if (tm == null) { Gaps.Add("time manager not found"); return; }
             double yr = Number(tm, "time.year", double.NaN);
             meta.Year = double.IsNaN(yr) || yr < 1 ? 1 : (int)yr;
+            var date = Member(tm, "time.date");
+            if (date != null)
+            {
+                double y2 = Reflect.Num(Reflect.Get(date, "year"), double.NaN), m2 = Reflect.Num(Reflect.Get(date, "month"), double.NaN), d2 = Reflect.Num(Reflect.Get(date, "dayOfMonth"), double.NaN);
+                if (!double.IsNaN(y2) && y2 >= 1) meta.Year = (int)y2;
+                if (!double.IsNaN(m2)) meta.Month = (int)m2;
+                if (!double.IsNaN(d2)) meta.Day = (int)d2;
+            }
             string label = Text(tm, "time.label") ?? "";
             var ym = System.Text.RegularExpressions.Regex.Match(label, @"Year\s+(\d+)");
             if (ym.Success) meta.Year = int.Parse(ym.Groups[1].Value, CultureInfo.InvariantCulture);
@@ -262,6 +281,19 @@ namespace FrontierArchitect.Game
                         BuildingType(b).IndexOf("TownHall", StringComparison.OrdinalIgnoreCase) >= 0)
                     { t = Number(b, "building.tier", 1); break; }
             return double.IsNaN(t) ? 1 : Math.Max(1, (int)t);
+        }
+
+        /// <summary>World bounds of a crop field (Cropfield.cachedCombinedBounds, else colliders).</summary>
+        public static Bounds FieldBounds(Component c)
+        {
+            if (Reflect.Get(c, "cachedCombinedBounds") is Bounds b && b.size.x > 0.1f) return b;
+            var list = Reflect.Items(Reflect.Get(c, "boundsList"));
+            if (list.Count > 0 && list[0] is Bounds first)
+            {
+                foreach (var o in list) if (o is Bounds bb) first.Encapsulate(bb);
+                return first;
+            }
+            return WorldBounds(c);
         }
 
         // ---------------------------------------------------------------- cursor

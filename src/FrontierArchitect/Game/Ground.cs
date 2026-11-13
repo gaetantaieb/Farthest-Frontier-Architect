@@ -20,6 +20,7 @@ namespace FrontierArchitect.Game
         private static bool _resolved;
         private static int _groundMask = ~0, _waterMask, _roadMask;
         private static float _seaLevel = float.NaN;
+        private static Func<float, float, float> _heightFn;
         private static readonly Dictionary<long, float> _heights = new Dictionary<long, float>();
         public static string Source = "unresolved";
         public static int Cells;
@@ -62,6 +63,18 @@ namespace FrontierArchitect.Game
             // sea level: gamemap water_height, else the terrain manager's seaLevel
             _seaLevel = map.WaterHeight;
             var tm = g.Singleton("TerrainManager");
+            _heightFn = null;
+            if (tm != null)
+            {
+                // Terrain2Manager.GetHeightInWorldSpace(x, z): the game's own height lookup
+                var mi = tm.GetType().GetMethods(Reflect.All).FirstOrDefault(m => m.Name == grid.Str("height_method", "GetHeightInWorldSpace") &&
+                    m.GetParameters().Length == 2 && m.GetParameters().All(p2 => p2.ParameterType == typeof(float)) && m.ReturnType == typeof(float));
+                if (mi != null)
+                {
+                    var target = mi.IsStatic ? null : tm;
+                    _heightFn = (x, z) => (float)mi.Invoke(target, new object[] { x, z });
+                }
+            }
             if (float.IsNaN(_seaLevel) && tm != null)
             {
                 double sl = Reflect.Num(Reflect.Get(tm, grid.Str("sea_level_member", "seaLevel")), double.NaN);
@@ -129,6 +142,19 @@ namespace FrontierArchitect.Game
                 normal = d.GetInterpolatedNormal(local.x / d.size.x, local.z / d.size.z);
                 water = !float.IsNaN(sea) && height < sea;
             }
+            else if (_heightFn != null)
+            {
+                try
+                {
+                    height = _heightFn(x, z);
+                    // slope from neighbouring heights (half a cell away)
+                    float d = Math.Max(0.5f, CellSize / 2f);
+                    float hx = _heightFn(x + d, z) - _heightFn(x - d, z), hz = _heightFn(x, z + d) - _heightFn(x, z - d);
+                    normal = new Vector3(-hx / (2 * d), 1f, -hz / (2 * d)).normalized;
+                    water = !float.IsNaN(sea) && height < sea - 0.05f;
+                }
+                catch { return false; }
+            }
             else
             {
                 var origin = new Vector3(x, Top, z);
@@ -172,6 +198,7 @@ namespace FrontierArchitect.Game
         {
             var t = Terrain.activeTerrain;
             if (t != null) return t.SampleHeight(new Vector3(x, 0, z)) + t.transform.position.y;
+            if (_heightFn != null) { try { return _heightFn(x, z); } catch { } }
             long key = ((long)Mathf.RoundToInt(x * 0.4f) << 32) ^ (uint)Mathf.RoundToInt(z * 0.4f);
             float y;
             if (_heights.TryGetValue(key, out y)) return y;
@@ -189,6 +216,7 @@ namespace FrontierArchitect.Game
             MapBounds(map, g, out b);
             var o = new JObject().Set("source", Source).Set("min", b.min.ToString()).Set("max", b.max.ToString())
                 .Set("sea_level", float.IsNaN(_seaLevel) ? null : (object)Math.Round(_seaLevel, 3))
+                .Set("height_source", _heightFn != null ? "terrain_manager" : "raycast")
                 .Set("ground_mask", _groundMask).Set("water_mask", _waterMask).Set("road_mask", _roadMask)
                 .Set("unity_terrains", Object.FindObjectsOfType<Terrain>().Length);
             // sample the centre cell

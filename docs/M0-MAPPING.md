@@ -1,5 +1,7 @@
 # Mapping a game build (milestone M0)
 
+**Status:** v1.1.2a (Mono) is mapped from its decompiled `Assembly-CSharp.dll`: every name in `gamemap.json` exists in that build, and the recipes follow the game's own code. Ops are `experimental` until you test them (below); field creation/resizing, roads, clearing and flattening are not mapped yet. When the game updates, repeat this page.
+
 The spec makes this the first engineering task: find the game's own classes for buildings, relocation,
 fields, roads and saves on the current Mono build, and mark each op **proven**, **Manual** or **dropped**.
 The mod does it with data, not code: [`gamemap.json`](../gamemap/gamemap.json) holds type names, member paths

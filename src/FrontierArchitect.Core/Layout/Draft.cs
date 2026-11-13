@@ -349,8 +349,9 @@ namespace FrontierArchitect.Core.Layout
             if (clutter > 0) r.Warnings.Add(clutter + " tiles have trees or rocks (clear_area first)");
             if (r.RoadTilesRemoved.Count > 0) r.Warnings.Add(r.RoadTilesRemoved.Count + " road tiles under the footprint will be removed");
 
-            bool resourceKnown = spec.FixedResource == "water" ||
-                                 Snapshot.Resources.Any(res => string.Equals(res.Type, spec.FixedResource, StringComparison.OrdinalIgnoreCase));
+            Func<string, bool> kindMatches = t => t != null && spec.FixedResource != null &&
+                (string.Equals(t, spec.FixedResource, StringComparison.OrdinalIgnoreCase) || t.StartsWith(spec.FixedResource + ":", StringComparison.OrdinalIgnoreCase));
+            bool resourceKnown = spec.FixedResource == "water" || Snapshot.Resources.Any(res => kindMatches(res.Type));
             if (spec.FixedResource != null && existing == null && !resourceKnown)
                 r.Warnings.Add("cannot verify that " + type + " sits on " + spec.FixedResource + " (no such resource in the snapshot); check it in game");
             else if (spec.FixedResource != null && existing == null)
@@ -358,7 +359,7 @@ namespace FrontierArchitect.Core.Layout
                 bool near = false;
                 foreach (var res in Snapshot.Resources)
                 {
-                    if (!string.Equals(res.Type, spec.FixedResource, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!kindMatches(res.Type)) continue;
                     if (Distance(rect, res.Pos) <= 3) { near = true; break; }
                 }
                 if (spec.FixedResource == "water")

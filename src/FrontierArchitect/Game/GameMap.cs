@@ -104,7 +104,8 @@ namespace FrontierArchitect.Game
     internal sealed class RecipeRunner
     {
         private readonly GameMap _map;
-        public RecipeRunner(GameMap map) { _map = map; }
+        private readonly GameAccess _g;
+        public RecipeRunner(GameMap map, GameAccess g = null) { _map = map; _g = g; }
 
         public bool Run(JArray steps, Dictionary<string, object> vars, out string error)
         {
@@ -112,7 +113,12 @@ namespace FrontierArchitect.Game
             if (steps == null || steps.Count == 0) { error = "no recipe"; return false; }
             foreach (var s in steps.Objects())
             {
-                if (s.Str("call") != null)
+                if (s.Str("builtin") != null)
+                {
+                    if (_g == null) { error = "builtins need game access"; return false; }
+                    if (!Builtins.Run(s.Str("builtin"), _g, vars, out error)) return false;
+                }
+                else if (s.Str("call") != null)
                 {
                     object target; string method;
                     if (!Split(s.Str("call"), vars, out target, out method, out error)) return false;
@@ -148,6 +154,7 @@ namespace FrontierArchitect.Game
             if (steps == null || steps.Count == 0) { error = "no recipe"; return false; }
             foreach (var s in steps.Objects())
             {
+                if (s.Str("builtin") != null) continue;
                 string expr = s.Str("call") ?? s.Str("set") ?? s.Str("get");
                 if (expr == null) { error = "bad step"; return false; }
                 object target; string last;

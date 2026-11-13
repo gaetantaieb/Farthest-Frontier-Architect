@@ -81,6 +81,7 @@ namespace FrontierArchitect.Game
             }
             catch (Exception e) { Log.Warn("agents/shared yaml: " + e.Message); }
             ExtractBuildingData(k);
+            ExtractCrops(k);
             _cachedKnowledge = k;
             _cachedKnowledgeVersion = Application.version;
             return k;
@@ -104,8 +105,9 @@ namespace FrontierArchitect.Game
                 if (!double.IsNaN(tier)) spec.Tier = Math.Max(1, (int)tier);
                 foreach (var c in Reflect.Items(_g.Member(bd, "building_data.cost")))
                 {
-                    string item = GameAccess.ItemName(Reflect.Get(c, "item") ?? Reflect.Get(c, "itemID") ?? Reflect.Get(c, "itemData") ?? Reflect.Get(c, "key"));
-                    double n = Reflect.Num(Reflect.Get(c, "count") ?? Reflect.Get(c, "amount") ?? Reflect.Get(c, "quantity") ?? Reflect.Get(c, "qty") ?? Reflect.Get(c, "value"), 0);
+                    // GetRequiredMaterialsDict() yields KeyValuePair<Item, int>
+                    string item = GameAccess.ItemName(Reflect.Get(c, "Key") ?? Reflect.Get(c, "item") ?? Reflect.Get(c, "itemID") ?? Reflect.Get(c, "itemData"));
+                    double n = Reflect.Num(Reflect.Get(c, "Value") ?? Reflect.Get(c, "count") ?? Reflect.Get(c, "amount") ?? Reflect.Get(c, "quantity") ?? Reflect.Get(c, "qty"), 0);
                     if (item != null && n > 0) spec.Cost[item] = n;
                 }
                 double days = _g.Number(bd, "building_data.build_time", double.NaN);
@@ -150,6 +152,64 @@ namespace FrontierArchitect.Game
                 if (!k.TierUnlocks.ContainsKey(spec.Tier)) k.TierUnlocks[spec.Tier] = new List<string>();
                 k.TierUnlocks[spec.Tier].Add(id);
             }
+        }
+
+        /// <summary>
+        /// The game's crop table: ObjectDataStore records of type VegetableFieldsRecord (fertility
+        /// depletion, weed and fertility multipliers, rockiness resilience, days) and
+        /// CropDiseaseRecord (which crops each soil disease targets). Replaces the estimates in
+        /// agents/shared/crops.yaml for every crop the game defines.
+        /// </summary>
+        private void ExtractCrops(KnowledgePack k)
+        {
+            var store = Reflect.FindType("ObjectDataStore");
+            var sheets = Reflect.Get(store, "dataSheetNameToDataRecords") as IDictionary;
+            var vegType = Reflect.FindType(_g.Map.Doc.Obj("crops")?.Str("record_type", "VegetableFieldsRecord") ?? "VegetableFieldsRecord");
+            var disType = Reflect.FindType("CropDiseaseRecord");
+            if (sheets == null || vegType == null || !sheets.Contains(vegType)) { _g.Gaps.Add("crop records not readable; crops.yaml estimates used"); return; }
+            var diseaseOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (disType != null && sheets.Contains(disType))
+                foreach (DictionaryEntry e in (IDictionary)sheets[disType])
+                {
+                    string disease = Reflect.Text(Reflect.Get(e.Value, "_diseaseName")) ?? Reflect.Text(e.Key);
+                    for (int i = 1; i <= 4; i++)
+                    {
+                        string crop = Reflect.Text(Reflect.Get(e.Value, "_targetCrop" + i));
+                        if (!string.IsNullOrEmpty(crop) && !diseaseOf.ContainsKey(crop)) diseaseOf[crop] = disease;
+                    }
+                }
+            int n = 0;
+            foreach (DictionaryEntry e in (IDictionary)sheets[vegType])
+            {
+                string name = Reflect.Text(e.Key);
+                var r = e.Value;
+                if (string.IsNullOrEmpty(name)) continue;
+                double depletion = Reflect.Num(Reflect.Get(r, "fertilityDepletionPerPlantingPercent"), 0);
+                double weedMult = Reflect.Num(Reflect.Get(r, "weedLevelMultiplier"), 1);
+                double fertMult = Reflect.Num(Reflect.Get(r, "fertilityMultiplier"), 1);
+                double sandClay = Reflect.Num(Reflect.Get(r, "sandClayOffset1"), double.NaN);
+                string display = Reflect.Text(Reflect.Get(r, "displayName"));
+                CropSpec old;
+                k.Crops.TryGetValue(name, out old);
+                string disease;
+                diseaseOf.TryGetValue(name, out disease);
+                if (disease == null && display != null) diseaseOf.TryGetValue(display, out disease);
+                k.Crops[name] = new CropSpec
+                {
+                    Name = name,
+                    Group = old?.Group ?? "",
+                    FertilityDelta = (float)(-depletion / 100.0),
+                    WeedSuppression = (float)Math.Max(0, (1 - weedMult) * 0.25),
+                    Disease = disease ?? old?.Disease,
+                    IdealClay = double.IsNaN(sandClay) ? (old?.IdealClay ?? 0.5f) : (float)Math.Max(0, Math.Min(1, 0.5 + sandClay / 2)),
+                    BaseYield = (float)Math.Max(0.1, fertMult),
+                    NeedsHarvest = Reflect.Num(Reflect.Get(r, "daysToMature"), 1) > 0,
+                    HarvestSeason = old?.HarvestSeason ?? "autumn",
+                    Approximate = false,
+                };
+                n++;
+            }
+            if (n > 0) k.Notes += "Crop parameters come from the game's VegetableFieldsRecord data (" + n + " crops); fertility_delta = -fertilityDepletionPerPlantingPercent/100, weed_suppression from weedLevelMultiplier.\n";
         }
 
         private static List<string> Unlocked(KnowledgePack k, int tier) =>
@@ -330,7 +390,7 @@ namespace FrontierArchitect.Game
             {
                 try
                 {
-                    var bounds = GameAccess.WorldBounds(c);
+                    var bounds = GameAccess.FieldBounds(c);
                     var min = grid.WorldToCell(bounds.min.x + 0.01f, bounds.min.z + 0.01f);
                     var max = grid.WorldToCell(bounds.max.x - 0.01f, bounds.max.z - 0.01f);
                     var f = new FieldInfo
@@ -339,27 +399,19 @@ namespace FrontierArchitect.Game
                         Handle = c,
                     };
                     f.Id = "field@" + f.Rect.X + "," + f.Rect.Z;
-                    f.Fertility = (float)_g.Number(c, "field.fertility", double.NaN);
-                    if (f.Fertility > 1.5f) f.Fertility /= 100f;
-                    f.Weeds = (float)Math.Max(0, _g.Number(c, "field.weeds", 0));
-                    if (f.Weeds > 1.5f) f.Weeds /= 100f;
-                    f.Rocks = (float)Math.Max(0, _g.Number(c, "field.rocks", 0));
-                    if (f.Rocks > 1.5f) f.Rocks /= 100f;
-                    f.CropInGround = _g.Text(c, "field.crop_in_ground") ?? "";
-                    var rot = Reflect.Items(_g.Member(c, "field.rotation"));
-                    if (rot.Count > 0)
-                    {
-                        f.Rotation = new List<List<string>>();
-                        foreach (var year in rot.Take(3))
-                        {
-                            var crops = Reflect.Items(year);
-                            f.Rotation.Add(crops.Count > 0 ? crops.Select(Reflect.Text).Where(s => s != null).ToList() : new List<string> { Reflect.Text(year) });
-                        }
-                        while (f.Rotation.Count < 3) f.Rotation.Add(new List<string>());
-                    }
-                    f.CurrentYear = (int)Math.Max(1, _g.Number(c, "field.current_year", 1));
-                    foreach (var d in Reflect.Items(_g.Member(c, "field.diseases"))) f.Diseases.Add(Reflect.Text(d));
-                    f.Workers = (int)_g.Number(c, "building.workers_assigned", 0);
+                    f.Fertility = Unit(_g.Number(c, "field.fertility", double.NaN));
+                    f.Weeds = Math.Max(0, Unit(_g.Number(c, "field.weeds", 0)));
+                    f.Rocks = Math.Max(0, Unit(_g.Number(c, "field.rocks", 0)));
+                    float soil = Unit(_g.Number(c, "field.soil", double.NaN)); // 0 = sand … 1 = clay
+                    if (!float.IsNaN(soil)) { f.Clay = soil; f.Sand = 1 - soil; }
+                    var rot = Reflect.Get(c, "cropScheduler") != null ? Builtins.ReadRotation(c) : new List<List<string>>();
+                    if (rot.Count > 0) { f.Rotation = rot; while (f.Rotation.Count < 3) f.Rotation.Add(new List<string>()); }
+                    double yearIdx = Reflect.Num(Reflect.Get(Reflect.Get(c, "cropScheduler"), "currentYearScheduleIdx"), double.NaN);
+                    if (!double.IsNaN(yearIdx)) f.CurrentYear = (int)yearIdx + 1;
+                    f.CropInGround = Reflect.Text(Reflect.Get(Reflect.Get(Reflect.Get(c, "cropScheduler"), "currentScheduledItem"), "recordName")) ?? "";
+                    foreach (var d in Reflect.Items(_g.Member(c, "field.diseases")))
+                        f.Diseases.Add(Reflect.Text(Reflect.Get(d, "recordName") ?? Reflect.Get(d, "name")) ?? Reflect.Text(d));
+                    f.Workers = (int)_g.Number(c, "field.workers", 0);
                     if (float.IsNaN(f.Fertility))
                     {
                         double sum = 0; int n = 0;
@@ -372,6 +424,8 @@ namespace FrontierArchitect.Game
             }
             if (_g.Map.ResolveType("Field") == null) _g.Gaps.Add("field type not found (types.Field)");
         }
+
+        private static float Unit(double v) => double.IsNaN(v) ? float.NaN : (float)(v > 1.5 ? v / 100.0 : v);
 
         private void ReadRoads(VillageSnapshot snap)
         {
@@ -412,25 +466,41 @@ namespace FrontierArchitect.Game
             if (cells.Count > 0) snap.Roads.Add(new RoadInfo { Type = "existing", Tiles = cells.OrderBy(c => c.Z).ThenBy(c => c.X).ToList() });
         }
 
+        /// <summary>
+        /// Natural resources by kind (gamemap.json "resources": game class → kind). Trees, stone,
+        /// forage and mineral deposits on v1.1.x; each node keeps its remaining amount when readable.
+        /// </summary>
         private void ReadResources(VillageSnapshot snap)
         {
             var grid = snap.Grid;
+            var kinds = _g.Map.Doc.Obj("resources") ?? new JObject().Set("TreeResource", "tree");
             int count = 0;
-            foreach (var c in _g.ObjectsOf("NaturalResource"))
+            foreach (var kv in kinds)
             {
-                if (count++ > 6000) break;
-                string type = _g.Text(c, "resource.type") ?? c.GetType().Name;
-                var p = c.transform.position;
-                var cell = grid.WorldToCell(p.x, p.z);
-                double rem = _g.Number(c, "resource.remaining", 1);
-                snap.Resources.Add(new ResourceNode { Type = type, Pos = cell, Remaining = rem });
-                if (grid.In(cell))
+                var t = Reflect.FindType(kv.Key);
+                if (t == null) continue;
+                string kind = kv.Value as string ?? kv.Key;
+                foreach (var o in Reflect.FindObjects(t))
                 {
-                    string t = type.ToLowerInvariant();
-                    if (t.Contains("tree")) grid.Clutter[grid.Idx(cell)] = 1;
-                    else if (t.Contains("rock") || t.Contains("stone")) grid.Clutter[grid.Idx(cell)] = 2;
+                    var c = o as Component;
+                    if (c == null || ++count > 12000) continue;
+                    string type = kind;
+                    var mineral = Reflect.Get(c, "mineralType");
+                    if (mineral != null) type = kind + ":" + mineral.ToString().ToLowerInvariant();
+                    var p = c.transform.position;
+                    var cell = grid.WorldToCell(p.x, p.z);
+                    double rem = 0;
+                    foreach (var q in Reflect.Items(Reflect.Get(c, "itemQtys"))) rem += Reflect.Num(q, 0);
+                    if (rem <= 0) rem = _g.Number(c, "resource.remaining", 1);
+                    snap.Resources.Add(new ResourceNode { Type = type, Pos = cell, Remaining = rem });
+                    if (grid.In(cell))
+                    {
+                        if (kind == "tree") grid.Clutter[grid.Idx(cell)] = 1;
+                        else if (kind == "stone") grid.Clutter[grid.Idx(cell)] = 2;
+                    }
                 }
             }
+            if (snap.Resources.Count == 0) _g.Gaps.Add("no natural resources found (gamemap.json resources)");
         }
 
         // ---------------------------------------------------------------- metrics
@@ -466,12 +536,21 @@ namespace FrontierArchitect.Game
             double consumption = Math.Max(0.01, pop * perCapita);
             double prodEstimate = snap.Buildings.Where(b => k.Spec(b.Type).ProducesFood).Sum(b => Math.Max(1, b.WorkersAssigned)) * KnowledgeNumber("food_per_worker_per_month", 2.5);
             bool stockKnown = snap.Stock.Count > 0;
+            var rmgr = _g.Singleton("ResourceManager");
+            double gameMonths = _g.Number(rmgr, "resource_manager.food_months", double.NaN);
+            double gameFood = _g.Number(rmgr, "resource_manager.food_total", double.NaN);
+            if (!double.IsNaN(gameFood)) { foodStock = gameFood; stockKnown = true; }
             m.Set("food", new JObject().Set("stock_total", stockKnown ? Math.Round(foodStock) : (object)null).Set("by_type", byType).Set("variety", variety)
                 .Set("consumption_per_month", Math.Round(consumption, 1)).Set("production_per_month", Math.Round(prodEstimate, 1))
                 .Set("months_of_food", stockKnown ? Math.Round(foodStock / consumption, 1) : (object)null)
                 .Set("rates_estimated", true));
+            if (!double.IsNaN(gameMonths))
+                m.Obj("food").Set("months_of_food", gameMonths).Set("months_of_food_source", "game estimate (ResourceManager.estimatedMonthsOfFoodLeft)")
+                    .Set("consumption_per_month", gameMonths > 0 ? Math.Round(foodStock / gameMonths, 1) : (object)null);
 
             double firewood = snap.StockOf(KnowledgeText("firewood_item", "Firewood"));
+            double gameWood = _g.Number(Reflect.Get(rmgr, "firewoodItemInfo"), "item_info.count", double.NaN);
+            if (!double.IsNaN(gameWood)) firewood = gameWood;
             int houses = snap.Buildings.Count(b => b.Category == "housing");
             double burn = Math.Max(0.01, houses * KnowledgeNumber("firewood_per_house_per_month", 2.0) * (snap.Meta.Season == "winter" ? 2 : 1));
             double woodProd = snap.Buildings.Where(b => k.Spec(b.Type).ProducesFirewood).Sum(b => Math.Max(1, b.WorkersAssigned)) * KnowledgeNumber("firewood_per_worker_per_month", 6);
