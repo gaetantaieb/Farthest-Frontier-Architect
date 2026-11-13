@@ -250,8 +250,16 @@ namespace FrontierArchitect
             var snap = FreshSnapshot();
             if (snap.Grid == null || snap.Grid.Width < 16 || snap.Grid.Height < 16)
             {
-                Toast("Architect needs the map but none could be read (" + string.Join("; ", snap.Gaps.Take(3).ToArray()) +
-                      "). Run Settings > Diagnostics > Run probe and send the probe folder.", 15);
+                // the first read may have happened while the save was loading: read the map again
+                Snapshots.InvalidateTerrain();
+                snap = FreshSnapshot();
+            }
+            if (snap.Grid == null || snap.Grid.Width < 16 || snap.Grid.Height < 16)
+            {
+                string mapWhy = "map source " + Game.Ground.Source + (Game.Ground.Problem.Length > 0 ? " (" + Game.Ground.Problem + ")" : "");
+                Log.Warn("Architect: no map. " + mapWhy + ". Gaps: " + string.Join("; ", snap.Gaps.ToArray()));
+                Toast("Architect needs the map but none could be read: " + mapWhy +
+                      ". Wait for the save to finish loading and try again; if it persists, run Settings > Diagnostics > Run probe and send report.json.", 15);
                 return;
             }
             var ctx = Context();

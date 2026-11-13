@@ -3,6 +3,13 @@
 Every version listed here is published by the release workflow (`.github/workflows/release.yml`) when it reaches `main`.
 The in-game updater shows the section of the version it installs.
 
+## [0.3.1] - 2026-11-13
+
+- Fix "Architect needs the map but none could be read": a map lookup that ran while the save was still loading
+  was remembered for the whole session. Failed lookups are no longer cached, Architect reads the map again before
+  giving up, and the map size falls back to the game's own setting (Small 1280 / Medium 1920 / Large 2560 world
+  units). The message now says which source failed and why.
+
 ## [0.3.0] - 2026-11-13
 
 Game map built from the decompiled Assembly-CSharp of Farthest Frontier v1.1.2a (Mono). Every type, member and

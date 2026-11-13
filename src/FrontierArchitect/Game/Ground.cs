@@ -50,10 +50,20 @@ namespace FrontierArchitect.Game
             return Source != "none";
         }
 
+        /// <summary>Why the last resolution found no map (shown to the player).</summary>
+        public static string Problem = "";
+
         private static void Resolve(GameMap map, GameAccess g)
         {
             if (_resolved) return;
-            _resolved = true;
+            ResolveOnce(map, g);
+            // A failure is not remembered: during loading the managers may not be ready yet.
+            _resolved = Source != "none";
+        }
+
+        private static void ResolveOnce(GameMap map, GameAccess g)
+        {
+            Problem = "";
             var grid = map.Doc.Obj("grid") ?? new JObject();
             _groundMask = Mask(grid.Str("ground_layer", "ClickCubes"));
             if (_groundMask == 0) _groundMask = ~(Mask(grid.Str("water_layer", "Water")) | Mask("UI") | Mask("Ignore Raycast"));
@@ -97,7 +107,21 @@ namespace FrontierArchitect.Game
                 var fert = g.Member(g.Singleton("AgricultureManager"), "agriculture.fertility");
                 if (fert is float[,] f2) Cells = f2.GetLength(0);
                 else if (fert is Array a && a.Length > 0) Cells = (int)Math.Round(Math.Sqrt(a.Length));
+                else Problem = "fertility map not ready";
             }
+            if (Cells <= 0)
+            {
+                // the map size category the game itself uses (Minimap: Small 1280, Medium 1920, Large 2560 world units)
+                var sizeEnum = Reflect.Get(Reflect.FindType("SettingsManager"), "mapSizeValue") ??
+                               Reflect.Get(tm, "terrainGenerator.mapSettings.size");
+                string name = sizeEnum?.ToString() ?? "";
+                float world = name == "Small" ? 1280f : name == "Medium" ? 1920f : name == "Large" ? 2560f : 0f;
+                var custom = grid.Obj("map_world_size");
+                if (custom != null && custom.ContainsKey(name)) world = (float)custom.Num(name, world);
+                if (world > 0) Cells = (int)Math.Round(world / CellSize);
+                else Problem += (Problem.Length > 0 ? "; " : "") + "map size setting not readable";
+            }
+            if (tm == null) Problem += (Problem.Length > 0 ? "; " : "") + "terrain manager not found";
             if (Cells > 0)
             {
                 Vector3 origin = Vector3.zero;
@@ -124,6 +148,7 @@ namespace FrontierArchitect.Game
                 return;
             }
             Source = "none";
+            if (Problem.Length == 0) Problem = "no terrain, cell grid or buildings found";
         }
 
         private static float Top => Math.Max(_bounds.max.y, 100f) + 300f;

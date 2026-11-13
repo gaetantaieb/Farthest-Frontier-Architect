@@ -14,7 +14,12 @@
     "sea_level_member": "seaLevel",
     "max_cells_per_side": 512,
     "water_height": null,
-    "ground_name": ""
+    "ground_name": "",
+    "map_world_size": {
+      "Small": 1280,
+      "Medium": 1920,
+      "Large": 2560
+    }
   },
   "types": {
     "GameManager": [
