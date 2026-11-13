@@ -221,7 +221,8 @@ namespace FrontierArchitect.Core.Scoring
             {
                 var notes = new List<string>();
                 var houses = live.Where(b => b.Category == "housing").ToList();
-                var services = live.Where(b => b.ServiceType != null && b.ServiceRadius > 0).ToList();
+                // area services only: defence is scored in O5, trade has no catchment radius
+                var services = live.Where(b => b.ServiceType != null && b.ServiceType != "defence" && b.ServiceRadius > 0).ToList();
                 var types = services.Select(s => s.ServiceType).Distinct().ToList();
                 foreach (var want in new[] { "market", "well" }) if (!types.Contains(want)) types.Add(want);
                 double o3 = 50;
@@ -313,7 +314,8 @@ namespace FrontierArchitect.Core.Scoring
                 if (conn.Unreachable.Count > 0)
                 {
                     notes.Add(conn.Unreachable.Count + " buildings not connected: " + string.Join(", ", conn.Unreachable.Take(5)));
-                    card.Violations.Add("connectivity " + Math.Round(connectivity * 100) + "% (required 100%)");
+                    if (_s.ConnectivityRequired)
+                        card.Violations.Add("road connectivity " + Math.Round(connectivity * 100) + "% (required 100% at the end of the plan; route_network closes it)");
                 }
                 notes.Add(d.Roads.Count + " road tiles, " + Math.Round(tilesPer, 1) + " per building");
                 card.Objectives["O6"] = Clamp(o6);

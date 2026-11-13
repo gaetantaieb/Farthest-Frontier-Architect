@@ -22,6 +22,8 @@ namespace FrontierArchitect.Core.Layout
         public double MinGain = 2;
         public int PhaseMaxActions = 12;
         public double DetourLimit = 1.3;
+        /// <summary>roads.connectivity: required = every building joined by road at the end of the plan.</summary>
+        public bool ConnectivityRequired = true;
         public List<string> KeyTrips = new List<string> { "house_market", "house_well", "producer_storage", "storage_market", "field_barn" };
         public bool ReuseExistingRoads = true;
         /// <summary>Yearly walking (tiles) a new road tile must save before a shortcut is kept.</summary>
@@ -178,8 +180,6 @@ namespace FrontierArchitect.Core.Layout
                             if (!Grid.IsLand(c) && !Flattened.Contains(c)) return r.Fail("tile " + c + " is not buildable (" + Grid.Terrain[Grid.Idx(c)] + ")");
                             var owner = _occ[Grid.Idx(c)];
                             if (owner != null) return r.Fail("tile " + c + " is occupied by " + owner);
-                            if (i > 0 && Math.Abs(tiles[i].X - tiles[i - 1].X) + Math.Abs(tiles[i].Z - tiles[i - 1].Z) != 1)
-                                r.Warnings.Add("tiles " + tiles[i - 1] + " and " + c + " are not adjacent");
                         }
                         int fresh = tiles.Count(t => !Roads.Contains(t));
                         r.Cost["road_tiles"] = fresh;

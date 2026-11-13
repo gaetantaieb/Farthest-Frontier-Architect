@@ -80,6 +80,7 @@ namespace FrontierArchitect.Core.Tools
         {
             var spec = _tools.FirstOrDefault(t => t.Name == name);
             if (spec == null) return ToolOutcome.Error("unknown tool " + name);
+            input = ToolValidation.Coerce(spec.InputSchema, input) as JObject ?? input;
             var err = ToolValidation.Validate(spec.InputSchema, input);
             if (err != null) return ToolOutcome.Error(err);
             if (name == "query")

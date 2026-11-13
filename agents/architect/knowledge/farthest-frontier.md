@@ -19,3 +19,13 @@ Layout conventions the scorer rewards:
 - Houses inside market, well, healer, school and chapel coverage; polluting industry away from houses.
 - Walls around housing and storage; towers covering gates and approaches.
 - Every building connected by road with the fewest tiles; existing roads are not a constraint.
+
+Roads, walls and resources as the mod reads them:
+- Villagers walk anywhere; roads only make them faster. Fields need no road (farmers walk in).
+- Walls and fences block roads and walking; gates are openings (roads pass through a gate tile,
+  but road_add cannot be placed on it). Buildings the game itself cannot reach are listed in
+  metrics.no_path_for_villagers.
+- snapshot.resources gives totals, clusters (24x24-tile groups) and single deposits (ore, clay…);
+  call get_region on an area to see every tree, rock and bush in it.
+- Service radii come from the game where it defines them (market and well catchment, entertainment,
+  spirituality, tower attack range); other radii are the defaults in buildings.yaml.

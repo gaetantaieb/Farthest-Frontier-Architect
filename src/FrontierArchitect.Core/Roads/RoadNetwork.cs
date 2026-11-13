@@ -97,10 +97,18 @@ namespace FrontierArchitect.Core.Roads
         private readonly TileGrid _g;
         private readonly RunSettings _s;
 
+        private readonly HashSet<Cell> _gates = new HashSet<Cell>();
+
         public RoadPlanner(DraftLayout draft, RunSettings settings)
         {
             _d = draft; _g = draft.Grid; _s = settings;
+            // gates are openings in walls and fences: roads and villagers pass through them
+            foreach (var b in _d.LiveBuildings)
+                if (b.Category == "gate") foreach (var c in b.Footprint.Cells()) _gates.Add(c);
         }
+
+        /// <summary>Gate tiles (passable for roads and walking, but no road is laid on them).</summary>
+        public ISet<Cell> Gates => _gates;
 
         // ---------------------------------------------------------------- costs
 
@@ -109,6 +117,7 @@ namespace FrontierArchitect.Core.Roads
         {
             if (!_g.In(c)) return double.PositiveInfinity;
             int i = _g.Idx(c);
+            if (_gates.Contains(c)) return 0.0001;
             if (_d.OwnerAt(c) != null) return double.PositiveInfinity;
             if (network != null && network.Contains(c)) return 0.0001;
             if (_s.ReuseExistingRoads && _d.Roads.Contains(c)) return 0.05;
@@ -124,6 +133,7 @@ namespace FrontierArchitect.Core.Roads
         {
             if (!_g.In(c)) return double.PositiveInfinity;
             if (roads.Contains(c)) return 0.6;
+            if (_gates.Contains(c)) return 1.0;
             var owner = _d.OwnerAt(c);
             if (owner != null && !owner.StartsWith("field:")) return double.PositiveInfinity;
             var t = _g.Terrain[_g.Idx(c)];
@@ -133,8 +143,11 @@ namespace FrontierArchitect.Core.Roads
 
         // ---------------------------------------------------------------- terminals
 
-        /// <summary>The road tile each building and field connects through.</summary>
-        public List<Terminal> Terminals()
+        /// <summary>
+        /// The road tile each building connects through. Fields are left out by default: in
+        /// Farthest Frontier farmers walk onto fields from anywhere, so a field needs no road.
+        /// </summary>
+        public List<Terminal> Terminals(bool includeFields = false)
         {
             var list = new List<Terminal>();
             var root = _d.LiveBuildings.FirstOrDefault(b => b.Category == "town_center");
@@ -145,13 +158,18 @@ namespace FrontierArchitect.Core.Roads
                 if (cell == null) { list.Add(new Terminal { Id = b.Id, Cell = b.EntranceCell, IsRoot = b == root }); continue; }
                 list.Add(new Terminal { Id = b.Id, Cell = cell.Value, IsRoot = b == root });
             }
+            if (includeFields) list.AddRange(FieldTerminals());
+            if (root == null && list.Count > 0) list[0].IsRoot = true;
+            return list;
+        }
+
+        private IEnumerable<Terminal> FieldTerminals()
+        {
             foreach (var f in _d.Fields.OrderBy(f => f.Id, StringComparer.Ordinal))
             {
                 var c = AccessCell(new Cell(f.Rect.X + f.Rect.W / 2, f.Rect.Z - 1), f.Rect);
-                if (c != null) list.Add(new Terminal { Id = "field:" + f.Id, Cell = c.Value });
+                if (c != null) yield return new Terminal { Id = "field:" + f.Id, Cell = c.Value };
             }
-            if (root == null && list.Count > 0) list[0].IsRoot = true;
-            return list;
         }
 
         private Cell? AccessCell(Cell preferred, Rect around)
@@ -268,13 +286,19 @@ namespace FrontierArchitect.Core.Roads
                         foreach (var c in path)
                     if (pending.Remove(c)) res.Connected += byCell.ContainsKey(c) ? byCell[c].Count : 0;
             }
-            foreach (var c in pending)
-                foreach (var id in byCell[c]) res.Unreachable.Add(id);
-
             res.Tiles = tree;
+            res.Tiles.ExceptWith(_gates);
             if (shortcuts) AddShortcuts(res, terminals);
+            res.Tiles.ExceptWith(_gates);
             res.ReusedTiles = res.Tiles.Count(c => _d.Roads.Contains(c));
             res.NewTiles = res.Tiles.Count - res.ReusedTiles;
+            // report connectivity exactly as score_draft measures it (network plus the roads kept)
+            var all = new HashSet<Cell>(res.Tiles);
+            all.UnionWith(_d.Roads);
+            var check = CheckConnectivity(all);
+            res.Terminals = check.Terminals;
+            res.Connected = check.Connected;
+            res.Unreachable = check.Unreachable;
             return res;
         }
 
@@ -369,7 +393,7 @@ namespace FrontierArchitect.Core.Roads
                         {
                             var barns = ofCat("storage").Concat(ofCat("farm")).ToList();
                             if (barns.Count == 0) break;
-                            foreach (var t in terminals.Where(t => t.Id.StartsWith("field:")))
+                            foreach (var t in FieldTerminals())
                             {
                                 var best = barns.OrderBy(b => b.Center.DistanceTo(t.Cell)).First();
                                 list.Add(Tuple.Create(t, map[best.Id], 30.0));
@@ -391,6 +415,9 @@ namespace FrontierArchitect.Core.Roads
             var res = new NetworkResult { Terminals = terms.Count };
             var root = terms.FirstOrDefault(t => t.IsRoot);
             if (root == null) return res;
+            var walk = new HashSet<Cell>(roads);
+            walk.UnionWith(_gates);
+            roads = walk;
             var start = roads.Contains(root.Cell) ? root.Cell : DraftLayout.Neighbours(root.Cell).FirstOrDefault(roads.Contains);
             if (!roads.Contains(start))
             {

@@ -182,6 +182,7 @@ namespace FrontierArchitect.Core.Agents
                 MinGain = MinGain,
                 PhaseMaxActions = PhaseMaxActions,
                 DetourLimit = DetourLimit,
+                ConnectivityRequired = ConnectivityRequired,
                 KeyTrips = new List<string>(KeyTrips),
                 ReuseExistingRoads = ReuseExistingSegments,
                 RoadTileWeight = RoadTileWeight,

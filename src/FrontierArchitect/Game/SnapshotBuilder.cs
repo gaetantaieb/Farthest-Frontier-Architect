@@ -140,18 +140,46 @@ namespace FrontierArchitect.Game
                     }
                     double wr = _g.Number(comp, "building.work_radius", double.NaN);
                     if (!double.IsNaN(wr) && wr > 0) spec.WorkRadius = (float)(wr / tile);
-                    double sr = _g.Number(comp, "building.service_radius", double.NaN);
-                    if (!double.IsNaN(sr) && sr > 0) spec.ServiceRadius = (float)(sr / tile);
                     double mw = _g.Number(comp, "building.workers_max", double.NaN);
                     if (!double.IsNaN(mw)) spec.MaxWorkers = (int)mw;
                 }
-                foreach (var kv in Reflect.Fields(bd).Take(40))
-                    if (kv.Value != null && !(kv.Value is string s && s.Length > 80)) spec.Raw.Set(kv.Key, kv.Value is IConvertible && !(kv.Value is string) ? Reflect.Num(kv.Value, 0) : (object)Reflect.Text(kv.Value));
                 k.Classify(spec);
+                if (prefab != null)
+                {
+                    var comp = prefab.GetComponent(_g.Map.ResolveType("Building") ?? typeof(Transform)) as Component;
+                    if (comp != null) ApplyGameRadii(comp, spec.Category, spec.ServiceType, tile, ref spec.ServiceRadius, ref spec.DesirabilityRadius, spec.WorkRadius);
+                }
                 k.Buildings[id] = spec;
                 if (!k.TierUnlocks.ContainsKey(spec.Tier)) k.TierUnlocks[spec.Tier] = new List<string>();
                 k.TierUnlocks[spec.Tier].Add(id);
             }
+        }
+
+        /// <summary>
+        /// Service and desirability radii as the game uses them. strategicPlanningRadius (50 units on
+        /// every building) is only meaningful for markets and wells (their catchment, see
+        /// MarketBuilding.circleRadius and ResourceManager's water-source check) and for buildings
+        /// with a strategic-planning bonus (decorations, polluters); entertainment and spirituality
+        /// have their own radii; towers cover their attack range (CombatResidence.circleRadius).
+        /// Everything else keeps the radius from agents/shared/buildings.yaml.
+        /// </summary>
+        private void ApplyGameRadii(Component comp, string category, string service, float tile, ref float serviceRadius, ref float desirabilityRadius, float workRadius)
+        {
+            double sp = _g.Number(comp, "building.service_radius", double.NaN);
+            if ((service == "market" || service == "well") && sp > 0) serviceRadius = (float)(sp / tile);
+            double bonus = _g.Number(comp, "building.desirability_bonus", 0);
+            if (Math.Abs(bonus) > 1e-6 && sp > 0) desirabilityRadius = (float)(sp / tile);
+            if (_g.Number(comp, "building.entertainment", 0) > 0)
+            {
+                double r = _g.Number(comp, "building.entertainment_radius", double.NaN);
+                if (r > 0) serviceRadius = (float)(r / tile);
+            }
+            if (_g.Number(comp, "building.spirituality", 0) > 0)
+            {
+                double r = _g.Number(comp, "building.spirituality_radius", double.NaN);
+                if (r > 0) serviceRadius = (float)(r / tile);
+            }
+            if (category == "defence" && workRadius > 0) serviceRadius = workRadius;
         }
 
         /// <summary>
@@ -322,11 +350,16 @@ namespace FrontierArchitect.Game
         private BuildingInfo ToBuilding(Component c, TileGrid grid, KnowledgePack k)
         {
             string type = _g.BuildingType(c);
-            // the game's placement footprint collider ("gridCollider") is the exact footprint
-            var gridCol = Reflect.Get(c, "gridCollider") as Collider;
-            var bounds = gridCol != null ? gridCol.bounds : GameAccess.WorldBounds(c);
-            var min = grid.WorldToCell(bounds.min.x + 0.01f, bounds.min.z + 0.01f);
-            var max = grid.WorldToCell(bounds.max.x - 0.01f, bounds.max.z - 0.01f);
+            Cell min, max;
+            if (!OccupiedCells(c, grid, out min, out max))
+            {
+                // fall back to the placement collider ("gridCollider"), slightly shrunk
+                var gridCol = Reflect.Get(c, "gridCollider") as Collider;
+                var bounds = gridCol != null ? gridCol.bounds : GameAccess.WorldBounds(c);
+                float inset = grid.TileSize * 0.25f;
+                min = grid.WorldToCell(bounds.min.x + inset, bounds.min.z + inset);
+                max = grid.WorldToCell(bounds.max.x - inset, bounds.max.z - inset);
+            }
             int rw = Math.Max(1, max.X - min.X + 1), rh = Math.Max(1, max.Z - min.Z + 1);
             int rot = Mathf.RoundToInt(c.transform.eulerAngles.y / 90f) & 3;
             var b = new BuildingInfo
@@ -347,8 +380,6 @@ namespace FrontierArchitect.Game
             if (!double.IsNaN(wr) && wr > 0) b.WorkRadius = (float)(wr / grid.TileSize);
             var centre = _g.Member(c, "building.work_center");
             if (centre is Vector3 v) b.WorkCircleCenter = grid.WorldToCell(v.x, v.z);
-            double sr = _g.Number(c, "building.service_radius", double.NaN);
-            if (!double.IsNaN(sr) && sr > 0) b.ServiceRadius = (float)(sr / grid.TileSize);
             var paused = _g.Member(c, "building.paused");
             if (paused is bool p && p) b.Status = "paused";
             var enabled = _g.Member(c, "building.work_enabled");
@@ -361,9 +392,33 @@ namespace FrontierArchitect.Game
             if (!double.IsNaN(res)) b.Extra.Set("residents", res);
             double cap = _g.Number(c, "building.capacity", double.NaN);
             if (!double.IsNaN(cap)) b.Extra.Set("capacity", cap);
+            var path = _g.Member(c, "building.path_exists");
+            if (path is bool pe && !pe) b.Extra.Set("no_path_for_villagers", true);
             k.ApplyTo(b);
+            float sr = b.ServiceRadius, dr = 0;
+            ApplyGameRadii(c, b.Category, b.ServiceType, grid.TileSize, ref sr, ref dr, b.WorkRadius);
+            b.ServiceRadius = sr;
             if (b.Tier <= 0) b.Tier = 1;
             return b;
+        }
+
+        /// <summary>
+        /// Exact tiles from Building.gridCellLocations (world x,z of each occupied game cell, the
+        /// same list the game's pathfinding grid uses). False when the building has none.
+        /// </summary>
+        private static bool OccupiedCells(Component c, TileGrid grid, out Cell min, out Cell max)
+        {
+            min = max = default(Cell);
+            var cells = Reflect.Get(c, "gridCellLocations") as Vector2[];
+            if (cells == null || cells.Length == 0) return false;
+            int x0 = int.MaxValue, z0 = int.MaxValue, x1 = int.MinValue, z1 = int.MinValue;
+            foreach (var v in cells)
+            {
+                var cell = grid.WorldToCell(v.x, v.y);
+                x0 = Math.Min(x0, cell.X); z0 = Math.Min(z0, cell.Z); x1 = Math.Max(x1, cell.X); z1 = Math.Max(z1, cell.Z);
+            }
+            min = new Cell(x0, z0); max = new Cell(x1, z1);
+            return true;
         }
 
         private readonly Dictionary<object, int> _workersByBuilding = new Dictionary<object, int>();
@@ -427,9 +482,38 @@ namespace FrontierArchitect.Game
 
         private static float Unit(double v) => double.IsNaN(v) ? float.NaN : (float)(v > 1.5 ? v / 100.0 : v);
 
+        /// <summary>
+        /// Roads, exactly: grid roads are buildings with roadMode set (their gridCellLocations are the
+        /// road tiles); spline roads and bridges give a speed bonus on the game's pathfinding grid
+        /// nodes (AIGridNode.nodeSpeedBonus). Falls back to probing the Roads layer per tile.
+        /// </summary>
         private void ReadRoads(VillageSnapshot snap)
         {
             var grid = snap.Grid;
+            var exact = new HashSet<Cell>();
+            int roadBuildings = 0, splineNodes = 0;
+            try
+            {
+                var bt = _g.Map.ResolveType("Building");
+                if (bt != null)
+                    foreach (var o in Reflect.FindObjects(bt))
+                    {
+                        var c = o as Component;
+                        if (c == null || !(_g.Member(c, "building.road_mode") is bool rm) || !rm) continue;
+                        var locs = Reflect.Get(c, "gridCellLocations") as Vector2[];
+                        if (locs == null) continue;
+                        roadBuildings++;
+                        foreach (var v in locs) { var cell = grid.WorldToCell(v.x, v.y); if (grid.In(cell)) exact.Add(cell); }
+                    }
+                splineNodes = PathGridRoads(grid, exact);
+            }
+            catch (Exception e) { _g.Gaps.Add("exact road read failed: " + e.Message); }
+            if (exact.Count > 0)
+            {
+                snap.Roads.Add(new RoadInfo { Type = "existing", Tiles = exact.OrderBy(c => c.Z).ThenBy(c => c.X).ToList() });
+                Log.Info("Roads: " + exact.Count + " tiles (" + roadBuildings + " road pieces, " + splineNodes + " path-grid nodes with a road bonus)");
+                return;
+            }
             var cells = new HashSet<Cell>();
             // Farthest Frontier: road meshes sit on the "Roads" layer; probe every cell (roads change, so no cache)
             if (Ground.HasRoadLayer && grid.Width > 1)
@@ -464,6 +548,35 @@ namespace FrontierArchitect.Game
             }
             if (cells.Count == 0) _g.Gaps.Add("no roads found (grid.road_layer / types.Road)");
             if (cells.Count > 0) snap.Roads.Add(new RoadInfo { Type = "existing", Tiles = cells.OrderBy(c => c.Z).ThenBy(c => c.X).ToList() });
+        }
+
+        private System.Reflection.FieldInfo _nodeSpeed, _nodePos;
+
+        /// <summary>Marks tiles whose pathfinding node has a road speed bonus (spline roads, bridges).</summary>
+        private int PathGridRoads(TileGrid grid, HashSet<Cell> into)
+        {
+            var t = _g.Map.ResolveType("PathGrid");
+            if (t == null) return 0;
+            var inst = Reflect.Get(t, "Instance") ?? Reflect.FindObject(t);
+            var nodes = Reflect.Get(inst, "grid") as Array;
+            if (nodes == null || nodes.Length == 0) return 0;
+            int n = 0;
+            foreach (var node in nodes)
+            {
+                if (node == null) continue;
+                if (_nodeSpeed == null)
+                {
+                    var nt = node.GetType();
+                    _nodeSpeed = nt.GetField("nodeSpeedBonus");
+                    _nodePos = nt.GetField("worldPosition");
+                    if (_nodeSpeed == null || _nodePos == null) return 0;
+                }
+                if ((float)_nodeSpeed.GetValue(node) <= 0f) continue;
+                var p = (Vector3)_nodePos.GetValue(node);
+                var cell = grid.WorldToCell(p.x, p.z);
+                if (grid.In(cell) && into.Add(cell)) n++;
+            }
+            return n;
         }
 
         /// <summary>
@@ -570,8 +683,10 @@ namespace FrontierArchitect.Game
                 .Set("fill_ratio", storageCap > 0 ? Math.Round(used / storageCap, 2) : (object)null));
 
             var prod = new JArray();
-            foreach (var b in snap.Buildings.Where(b => b.WorkersMax > 0).OrderBy(b => (double)b.WorkersAssigned / Math.Max(1, b.WorkersMax)).Take(25))
+            foreach (var b in snap.Buildings.Where(b => b.WorkersMax > 0 && b.Category != "housing").OrderBy(b => (double)b.WorkersAssigned / Math.Max(1, b.WorkersMax)).Take(25))
                 prod.Add(new JObject().Set("id", b.Id).Set("assigned", b.WorkersAssigned).Set("max", b.WorkersMax).Set("status", b.Status));
+            var noPath = snap.Buildings.Where(b => b.Extra.Bool("no_path_for_villagers")).Select(b => b.Id).Take(20).ToJArray();
+            if (noPath.Count > 0) m.Set("no_path_for_villagers", noPath);
             m.Set("production", new JObject().Set("staffing_lowest_first", prod)
                 .Set("buildings_paused", snap.Buildings.Count(b => b.Status == "paused")));
 

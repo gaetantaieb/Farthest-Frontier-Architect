@@ -29,15 +29,16 @@ namespace FrontierArchitect.Core.Model
             var cost = new JObject();
             foreach (var kv in Cost) cost.Set(kv.Key, kv.Value);
             var o = new JObject().Set("type", Type).Set("category", Category).Set("tier", Tier)
-                .Set("footprint", new JArray { (long)W, (long)H }).Set("cost", cost).Set("build_days", BuildDays)
-                .Set("max_workers", MaxWorkers);
+                .Set("footprint", new JArray { (long)W, (long)H });
+            if (cost.Count > 0) o.Set("cost", cost);
+            o.Set("build_days", BuildDays);
+            if (MaxWorkers > 0) o.Set("max_workers", MaxWorkers);
             if (WorkRadius > 0) o.Set("work_radius", WorkRadius);
             if (ServiceRadius > 0) o.Set("service", new JObject().Set("type", ServiceType).Set("radius", ServiceRadius));
             if (FixedResource != null) o.Set("fixed_resource", FixedResource);
             if (Math.Abs(Desirability) > 0.001f) o.Set("desirability", new JObject().Set("value", Desirability).Set("radius", DesirabilityRadius));
             if (ProducesFood) o.Set("produces_food", true);
             if (ProducesFirewood) o.Set("produces_firewood", true);
-            if (Raw.Count > 0) o.Set("raw", Raw);
             return o;
         }
     }

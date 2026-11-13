@@ -29,7 +29,26 @@ namespace FrontierArchitect.Core.Model
                 c = new Cell((int)Math.Round(o.Num("x")), (int)Math.Round(o.Num("z")));
                 return true;
             }
+            // Claude sometimes sends coordinates as text: "[12,34]", "12,34" or "12 34"
+            if (v is string s)
+            {
+                var n = Numbers(s);
+                if (n != null && n.Count == 2) { c = new Cell((int)Math.Round(n[0]), (int)Math.Round(n[1])); return true; }
+            }
             return false;
+        }
+
+        private static readonly System.Text.RegularExpressions.Regex PointText =
+            new System.Text.RegularExpressions.Regex(@"^\s*[\[(]?\s*(-?\d+(?:\.\d+)?)(?:\s*[,; ]\s*(-?\d+(?:\.\d+)?))+\s*[\])]?\s*$");
+
+        /// <summary>The numbers in a text like "[1,2]" or "1, 2, 3, 4"; null when it is not just numbers.</summary>
+        internal static List<double> Numbers(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s) || !PointText.IsMatch(s)) return null;
+            var list = new List<double>();
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(s, @"-?\d+(?:\.\d+)?"))
+                list.Add(double.Parse(m.Value, System.Globalization.CultureInfo.InvariantCulture));
+            return list;
         }
     }
 
@@ -65,6 +84,15 @@ namespace FrontierArchitect.Core.Model
             {
                 r = new Rect(o.Int("x"), o.Int("z"), o.Int("w"), o.Int("h"));
                 return r.W > 0 && r.H > 0;
+            }
+            if (v is string s)
+            {
+                var n = Cell.Numbers(s);
+                if (n != null && n.Count == 4)
+                {
+                    r = new Rect((int)n[0], (int)n[1], (int)n[2], (int)n[3]);
+                    return r.W > 0 && r.H > 0;
+                }
             }
             return false;
         }
@@ -186,13 +214,17 @@ namespace FrontierArchitect.Core.Model
             var o = new JObject()
                 .Set("id", Id).Set("type", Type).Set("category", Category).Set("tier", Tier)
                 .Set("pos", new Cell(X, Z).ToJson()).Set("rot", Rot).Set("footprint", new JArray { (long)Footprint.W, (long)Footprint.H })
-                .Set("entrance", EntranceCell.ToJson())
-                .Set("workers", new JObject().Set("assigned", WorkersAssigned).Set("max", WorkersMax));
+                .Set("entrance", EntranceCell.ToJson());
+            // housing "workers" are residents (kept in extra); empty fields are left out to keep the prompt small
+            if (WorkersMax > 0 && Category != "housing") o.Set("workers", new JObject().Set("assigned", WorkersAssigned).Set("max", WorkersMax));
             if (WorkRadius > 0)
                 o.Set("work_circle", new JObject().Set("center", (WorkCircleCenter ?? Center).ToJson()).Set("radius", Math.Round(WorkRadius, 1)));
             if (ServiceRadius > 0) o.Set("service", new JObject().Set("type", ServiceType).Set("radius", Math.Round(ServiceRadius, 1)));
-            o.Set("inputs", Inputs.ToJArray()).Set("outputs", Outputs.ToJArray())
-             .Set("production_limit", ProductionLimit).Set("status", Status).Set("locked", Locked);
+            if (Inputs.Count > 0) o.Set("inputs", Inputs.ToJArray());
+            if (Outputs.Count > 0) o.Set("outputs", Outputs.ToJArray());
+            if (ProductionLimit.Count > 0) o.Set("production_limit", ProductionLimit);
+            if (Status != "active") o.Set("status", Status);
+            if (Locked) o.Set("locked", true);
             if (Extra.Count > 0) o.Set("extra", Extra);
             return o;
         }
@@ -335,7 +367,7 @@ namespace FrontierArchitect.Core.Model
             }
             var f = new JArray(); foreach (var x in Fields) f.Add(x.ToJson());
             var r = new JArray(); if (includeRoads) foreach (var x in Roads) r.Add(x.ToJson());
-            var res = new JArray(); foreach (var x in Resources) res.Add(x.ToJson());
+            var res = ResourceSummary(Resources);
             var stock = new JObject();
             var keys = new List<string>(Stock.Keys); keys.Sort(StringComparer.Ordinal);
             foreach (var k in keys) stock.Set(k, Math.Round(Stock[k], 1));
@@ -355,6 +387,45 @@ namespace FrontierArchitect.Core.Model
             }
             if (Gaps.Count > 0) o.Set("data_gaps", Gaps.ToJArray());
             return o;
+        }
+
+        /// <summary>
+        /// Natural resources for the prompt: totals per kind, clusters (nodes grouped per 24×24 tiles)
+        /// and rare deposits (ore, clay, sand…) one by one. Thousands of single trees and bushes would
+        /// cost hundreds of thousands of tokens; get_region lists single nodes for any area.
+        /// </summary>
+        public static JObject ResourceSummary(List<ResourceNode> nodes)
+        {
+            const int chunk = 24;
+            var totals = new SortedDictionary<string, double[]>(StringComparer.Ordinal);
+            var groups = new Dictionary<string, List<ResourceNode>>();
+            var deposits = new JArray();
+            foreach (var n in nodes)
+            {
+                double[] t;
+                if (!totals.TryGetValue(n.Type, out t)) totals[n.Type] = t = new double[2];
+                t[0]++; t[1] += n.Remaining;
+                bool common = n.Type == "tree" || n.Type == "stone" || n.Type == "forage";
+                if (!common && deposits.Count < 300) { deposits.Add(n.ToJson()); continue; }
+                string key = n.Type + "|" + (n.Pos.X / chunk) + "|" + (n.Pos.Z / chunk);
+                List<ResourceNode> list;
+                if (!groups.TryGetValue(key, out list)) groups[key] = list = new List<ResourceNode>();
+                list.Add(n);
+            }
+            var tot = new JObject();
+            foreach (var kv in totals) tot.Set(kv.Key, new JObject().Set("nodes", (long)kv.Value[0]).Set("remaining", Math.Round(kv.Value[1])));
+            var clusters = new JArray();
+            foreach (var g in groups.OrderBy(g => g.Key, StringComparer.Ordinal))
+            {
+                var l = g.Value;
+                if (l.Count < 3) continue;
+                int minX = l.Min(n => n.Pos.X), minZ = l.Min(n => n.Pos.Z), maxX = l.Max(n => n.Pos.X), maxZ = l.Max(n => n.Pos.Z);
+                clusters.Add(new JObject().Set("type", l[0].Type)
+                    .Set("rect", new JArray { (long)minX, (long)minZ, (long)(maxX - minX + 1), (long)(maxZ - minZ + 1) })
+                    .Set("nodes", l.Count).Set("remaining", Math.Round(l.Sum(n => n.Remaining))));
+            }
+            return new JObject().Set("totals", tot).Set("clusters", clusters).Set("deposits", deposits)
+                .Set("note", "clusters group nodes per 24x24 tiles (rect = their extent; groups under 3 nodes are left out); get_region lists every node in an area");
         }
 
         public double StockOf(string item)

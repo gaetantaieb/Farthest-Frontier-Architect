@@ -338,3 +338,105 @@ namespace FrontierArchitect.Tests
         }
     }
 }
+
+namespace FrontierArchitect.Tests
+{
+    /// <summary>Fixes from the first live Architect run (v1.1.2a, 384x384 map).</summary>
+    public class LiveRunRegressionTests
+    {
+        private static ArchitectToolHost Host(VillageSnapshot snap) =>
+            new ArchitectToolHost(snap, A.Settings(), null, null, 3, 3);
+
+        [Fact]
+        public void CoordinatesSentAsTextAreAccepted()
+        {
+            Cell c;
+            Assert.True(Cell.TryParse("[163,195]", out c));
+            Assert.Equal(new Cell(163, 195), c);
+            Assert.True(Cell.TryParse(" 12, 7 ", out c));
+            Assert.False(Cell.TryParse("House@20,20", out c));
+            Rect r;
+            Assert.True(Rect.TryParse("[1,2,3,4]", out r));
+            Assert.Equal(3, r.W);
+
+            var h = Host(Village.Build());
+            var road = h.Execute("route_road", new JObject().Set("from", "[30,40]").Set("to", "field:field@44,40"), CancellationToken.None);
+            Assert.False(road.IsError, road.Content);
+            var sites = Json.ParseObject(h.Execute("find_sites", new JObject().Set("building_type", "Well").Set("near", "[45,15]").Set("limit", "2"), CancellationToken.None).Content);
+            var first = sites.Arr("sites").Objects().First();
+            Assert.True(new Cell(first.Int("x"), first.Int("z")).DistanceTo(new Cell(45, 15)) < 8, first.ToString());
+            Assert.Equal(2, sites.Arr("sites").Count);
+        }
+
+        [Fact]
+        public void StringifiedJsonIsRepairedBeforeValidation()
+        {
+            var schema = Json.ParseObject("{\"type\":\"object\",\"properties\":{\"tiles\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"apply\":{\"type\":\"boolean\"},\"n\":{\"type\":\"integer\"}}}");
+            var input = Json.ParseObject("{\"tiles\":\"[[1,2],[3,4]]\",\"apply\":\"true\",\"n\":\"5\"}");
+            var fixedInput = (JObject)FrontierArchitect.Core.Claude.ToolValidation.Coerce(schema, input);
+            Assert.Null(FrontierArchitect.Core.Claude.ToolValidation.Validate(schema, fixedInput));
+            Assert.Equal(2, fixedInput.Arr("tiles").Count);
+            Assert.True(fixedInput.Bool("apply"));
+        }
+
+        [Fact]
+        public void GatesArePassableAndFieldsNeedNoRoad()
+        {
+            var snap = Village.Build();
+            var k = snap.Knowledge;
+            // fence ring two tiles around the house at 20,36 (footprint 20..22 x 36..38), gate on the south side
+            var house = snap.Buildings.First(b => b.Id == "House@20,36");
+            var keep = new HashSet<Cell>(snap.RoadCells());
+            for (int x = 18; x <= 24; x++)
+                for (int z = 34; z <= 40; z++)
+                {
+                    bool ring = x == 18 || x == 24 || z == 34 || z == 40;
+                    if (!ring) continue;
+                    var type = (x == 21 && z == 34) ? "WallFenceGate" : "WallFence";
+                    snap.Buildings.Add(Village.B(k, type, x, z));
+                    keep.Remove(new Cell(x, z));
+                }
+            // roads: inside the ring from the gate to the house, outside from the gate to the network
+            for (int x = 19; x <= 23; x++) for (int z = 35; z <= 39; z++) keep.Remove(new Cell(x, z));
+            keep.Add(new Cell(21, 35));
+            snap.Roads.Clear();
+            var planner0 = new RoadPlanner(new DraftLayout(snap), A.Settings());
+            foreach (var c in planner0.RouteRoad(new Cell(21, 33), new Cell(29, 26)) ?? new List<Cell>()) keep.Add(c);
+            snap.Roads.Add(new RoadInfo { Tiles = keep.ToList() });
+
+            var planner = new RoadPlanner(new DraftLayout(snap), A.Settings());
+            Assert.DoesNotContain(planner.Terminals(), t => t.Id.StartsWith("field:"));
+            var conn = planner.CheckConnectivity();
+            Assert.DoesNotContain(house.Id, conn.Unreachable);
+        }
+
+        [Fact]
+        public void RouteNetworkGroupsTilesAndReportsTheScorersConnectivity()
+        {
+            var h = Host(Village.Build(connected: false));
+            var r = Json.ParseObject(h.Execute("route_network", new JObject().Set("apply", true), CancellationToken.None).Content);
+            int adds = r.Arr("actions").Objects().Count(a => a.Str("op") == "road_add");
+            Assert.InRange(adds, 1, 3);
+            var card = new Scorer(A.Settings()).Score(h.Draft);
+            Assert.Equal(card.Roads.Connectivity, r.Num("connectivity"), 3);
+            Assert.Empty(card.Violations);
+        }
+
+        [Fact]
+        public void SnapshotSummarisesThousandsOfResourceNodes()
+        {
+            var snap = Village.Build();
+            var rnd = new System.Random(3);
+            for (int i = 0; i < 5000; i++)
+                snap.Resources.Add(new ResourceNode { Type = i % 3 == 0 ? "forage" : "tree", Pos = new Cell(rnd.Next(1, 59), rnd.Next(1, 59)), Remaining = 30 });
+            snap.Resources.Add(new ResourceNode { Type = "ore:iron", Pos = new Cell(5, 50), Remaining = 900 });
+            var json = snap.ToJson();
+            var res = json.Obj("resources");
+            Assert.Equal(1L, res.Arr("deposits").Objects().Count(d => d.Str("type") == "ore:iron"));
+            Assert.True(res.Obj("totals").Obj("tree").Long("nodes") > 3000);
+            Assert.True(Json.Write(res).Length < 40000, "resources section is " + Json.Write(res).Length + " chars");
+            // empty building fields are left out
+            Assert.DoesNotContain(json.Arr("buildings").Objects(), b => b.ContainsKey("inputs") || b.ContainsKey("locked"));
+        }
+    }
+}

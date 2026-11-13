@@ -19,6 +19,13 @@
       "Small": 1280,
       "Medium": 1920,
       "Large": 2560
+    },
+    "path_grid": {
+      "_about": "the game's pathfinding grid: road speed bonus, water, gate and bridge flags and walkable areas per node",
+      "instance": "Instance",
+      "nodes": "grid",
+      "width": "gridWidth",
+      "node_size": "nodeSize"
     }
   },
   "types": {
@@ -80,6 +87,10 @@
     ],
     "CESceneManager": [
       "CESceneManager"
+    ],
+    "PathGrid": [
+      "AIPathfinding.AIGridGraph",
+      "AIGridGraph"
     ]
   },
   "members": {
@@ -178,8 +189,7 @@
       "<WorkArea>.GetCenter()"
     ],
     "building.service_radius": [
-      "strategicPlanningRadius",
-      "circleRadius"
+      "strategicPlanningRadius"
     ],
     "building.paused": [
       "isPaused",
@@ -192,11 +202,13 @@
       "isBuildSite"
     ],
     "building.residents": [
+      "residencyComponent.residentsRO.Count",
       "residents.Count",
       "occupants.Count",
       "inhabitants.Count"
     ],
     "building.capacity": [
+      "residencyComponent.maxVacancyAvailable",
       "residentCapacity",
       "maxResidents",
       "housingCapacity",
@@ -304,6 +316,30 @@
     ],
     "field.workers": [
       "allocatedWorkers"
+    ],
+    "building.path_exists": [
+      "pathExistsForVillage"
+    ],
+    "building.road_mode": [
+      "roadMode"
+    ],
+    "building.grid_cells": [
+      "gridCellLocations"
+    ],
+    "building.desirability_bonus": [
+      "strategicPlanningBonus"
+    ],
+    "building.entertainment": [
+      "entertainmentPoints"
+    ],
+    "building.entertainment_radius": [
+      "entertainmentRadius"
+    ],
+    "building.spirituality": [
+      "spiritualityPoints"
+    ],
+    "building.spirituality_radius": [
+      "spiritualityRadius"
     ]
   },
   "ops": {

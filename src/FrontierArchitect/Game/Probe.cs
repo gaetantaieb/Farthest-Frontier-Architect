@@ -19,6 +19,39 @@ namespace FrontierArchitect.Game
     /// </summary>
     internal static class Probe
     {
+        /// <summary>What the exact road / footprint / pathfinding readers see (v0.4.0).</summary>
+        private static JObject RoadsAndPaths(GameMap map, GameAccess g)
+        {
+            var o = new JObject();
+            try
+            {
+                int roadPieces = 0, roadCells = 0, withCells = 0, noPath = 0, all = 0;
+                var bt = map.ResolveType("Building");
+                if (bt != null)
+                    foreach (var obj in Reflect.FindObjects(bt))
+                    {
+                        all++;
+                        var cells = Reflect.Get(obj, "gridCellLocations") as Vector2[];
+                        if (cells != null && cells.Length > 0) withCells++;
+                        if (g.Member(obj, "building.road_mode") is bool rm && rm) { roadPieces++; roadCells += cells?.Length ?? 0; }
+                        if (g.Member(obj, "building.path_exists") is bool pe && !pe) noPath++;
+                    }
+                o.Set("buildings", all).Set("with_grid_cells", withCells).Set("road_pieces", roadPieces).Set("road_piece_cells", roadCells)
+                 .Set("without_village_path", noPath);
+                var pt = map.ResolveType("PathGrid");
+                var inst = pt == null ? null : (Reflect.Get(pt, "Instance") ?? Reflect.FindObject(pt));
+                var nodes = Reflect.Get(inst, "grid") as Array;
+                int bonus = 0;
+                if (nodes != null)
+                    foreach (var n in nodes) if (n != null && Reflect.Num(Reflect.Get(n, "nodeSpeedBonus"), 0) > 0) bonus++;
+                o.Set("path_grid", new JObject().Set("resolved", pt?.FullName).Set("width", Reflect.Num(Reflect.Get(inst, "gridWidth"), 0))
+                    .Set("depth", Reflect.Num(Reflect.Get(inst, "gridDepth"), 0)).Set("node_size", Reflect.Num(Reflect.Get(inst, "nodeSize"), 0))
+                    .Set("nodes", nodes?.Length ?? 0).Set("nodes_with_road_bonus", bonus));
+            }
+            catch (Exception e) { o.Set("error", e.Message); }
+            return o;
+        }
+
         private static readonly string[] Keywords =
         {
             "relocat", "demolish", "deconstruct", "destroy", "construct", "buildsite", "placement", "place",
@@ -166,6 +199,7 @@ namespace FrontierArchitect.Game
             var distinct = buildings.Select(b => g.BuildingType(b)).GroupBy(x => x).OrderBy(x => x.Key).Select(x => (object)(x.Key + " x" + x.Count()));
             o.Set("building_types_in_village", new JArray(distinct));
             o.Set("ground", Ground.Describe(map, g));
+            o.Set("roads_and_paths", RoadsAndPaths(map, g));
             var ops = new JObject();
             var exec = new GameExecutor(g, null);
             foreach (var op in Core.Planning.Ops.All)

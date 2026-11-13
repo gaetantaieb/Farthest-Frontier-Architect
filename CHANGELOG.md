@@ -3,6 +3,41 @@
 Every version listed here is published by the release workflow (`.github/workflows/release.yml`) when it reaches `main`.
 The in-game updater shows the section of the version it installs.
 
+## [0.4.0] - 2026-11-13
+
+From the first successful Architect run (ambition 2, 244 villagers, Medium map). The run cost 320k prompt tokens and
+spent its turns on road holes and parse errors; this release fixes what it ran into.
+
+Prompt about 7x smaller (roughly 320k → 45k tokens):
+- The building catalogue no longer carries a raw dump of every BuildingData field (280 KB of the 355 KB knowledge pack).
+- Natural resources are summarised: totals per kind, 24x24-tile clusters and single deposits (ore, clay…) instead of
+  4,500 individual trees and bushes. `get_region` still lists every node in an area.
+- Empty building fields (inputs, outputs, limits, "locked": false, "status": "active") are left out; houses no longer
+  show residents as "workers", and the staffing list skips housing.
+
+Exact game data:
+- Roads: grid roads are read from the game's road pieces (`Building.roadMode` + `gridCellLocations`) and spline roads
+  and bridges from the pathfinding grid (`AIGridGraph` nodes with a road speed bonus). The per-tile raycast left holes
+  in diagonal roads, so route_network "filled" them with 92 one-tile road actions.
+- Footprints from `Building.gridCellLocations` (the cells the game itself occupies); houses were read 4x4 instead of 3x3.
+- Buildings the game cannot reach (`pathExistsForVillage` false) are flagged and listed in `metrics.no_path_for_villagers`.
+- Service radii: `strategicPlanningRadius` (50 units on every building) is used only where the game uses it — market and
+  well catchment, desirability bonuses — plus entertainment and spirituality radii and tower attack range. Before, every
+  house and shop got a 10-tile "service", which made the O3/O5 coverage notes meaningless.
+- Housing capacity from `residencyComponent.maxVacancyAvailable` (was a guessed 4 per house: "housing short by 40").
+
+Roads and connectivity:
+- Gates are openings: roads and walking pass through gate tiles (fenced fields and walled districts were "unconnected").
+- Fields are no longer road terminals: farmers walk onto fields from anywhere.
+- route_network reports the same connectivity as score_draft (it said 66% while the scorer said 99%), and groups new
+  tiles into a few area actions instead of one action per run.
+- `roads.connectivity` in agent.yaml is honoured (`required`, or anything else for "do not lower it").
+
+Tools:
+- Points sent as text ("[163,195]", "163,195") and ids like "field:field@162,186" are accepted everywhere; JSON sent as a
+  string, numbers as text and "true"/"false" are repaired before validation. These cost the run four turns.
+- Probe report: new `roads_and_paths` section (road pieces, path-grid nodes with a road bonus, buildings without a path).
+
 ## [0.3.1] - 2026-11-13
 
 - Fix "Architect needs the map but none could be read": a map lookup that ran while the save was still loading

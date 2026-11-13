@@ -149,6 +149,7 @@ namespace FrontierArchitect.Core.Tools
         {
             var spec = _tools.FirstOrDefault(t => t.Name == name);
             if (spec == null) return ToolOutcome.Error("unknown or disabled tool '" + name + "'");
+            input = ToolValidation.Coerce(spec.InputSchema, input) as JObject ?? input;
             var err = ToolValidation.Validate(spec.InputSchema, input);
             if (err != null) return ToolOutcome.Error(err);
             switch (name)
@@ -195,12 +196,24 @@ namespace FrontierArchitect.Core.Tools
         private bool TryPoint(object v, out Cell c)
         {
             if (Cell.TryParse(v, out c)) return true;
-            if (v is string id)
+            if (v is string raw)
             {
+                string id = raw.Trim();
+                if (id.StartsWith("field:", StringComparison.OrdinalIgnoreCase)) id = id.Substring(6);
                 BuildingInfo b;
-                if (Draft.Buildings.TryGetValue(id, out b)) { c = new RoadPlanner(Draft, _s).Terminals().FirstOrDefault(t => t.Id == id)?.Cell ?? b.EntranceCell; return true; }
-                var f = Draft.Fields.FirstOrDefault(x => x.Id == id);
-                if (f != null) { c = f.Rect.Center; return true; }
+                if (!Draft.Buildings.TryGetValue(id, out b))
+                    b = Draft.Buildings.Values.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+                if (b != null) { c = new RoadPlanner(Draft, _s).Terminals().FirstOrDefault(t => t.Id == b.Id)?.Cell ?? b.EntranceCell; return true; }
+                var f = Draft.Fields.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+                if (f != null)
+                {
+                    // a tile just outside the field that a road can use, else its centre
+                    var planner = new RoadPlanner(Draft, _s);
+                    var access = DraftLayout.Border(f.Rect, 1).Where(x => !double.IsInfinity(planner.LayCost(x, null)))
+                        .OrderBy(x => x.DistanceTo(f.Rect.Center)).Cast<Cell?>().FirstOrDefault();
+                    c = access ?? f.Rect.Center;
+                    return true;
+                }
             }
             return false;
         }
@@ -440,15 +453,15 @@ namespace FrontierArchitect.Core.Tools
         {
             var planner = new RoadPlanner(Draft, _s);
             var net = planner.Design(null, input.Bool("shortcuts", true));
-            var fresh = net.Tiles.Where(c => !Draft.Roads.Contains(c)).ToList();
-            var addSegments = Segments(fresh);
+            var fresh = net.Tiles.Where(c => !Draft.Roads.Contains(c) && !planner.Gates.Contains(c)).ToList();
+            var addSegments = Clusters(Segments(fresh), 8, 240);
             var actions = new JArray();
             int n = 0;
             foreach (var seg in addSegments)
             {
                 var t = new JArray(); foreach (var c in seg) t.Add(c.ToJson());
                 actions.Add(new JObject().Set("id", "net" + (++n)).Set("op", Ops.RoadAdd).Set("params", new JObject().Set("road_type", "dirt").Set("tiles", t))
-                    .Set("objective", "O6").Set("rationale", "Network segment, " + seg.Count + " tiles"));
+                    .Set("objective", "O6").Set("rationale", "Road network, " + seg.Count + " tiles near " + seg[seg.Count / 2]));
             }
             if (input.Bool("remove_unused", true))
             {
@@ -480,6 +493,38 @@ namespace FrontierArchitect.Core.Tools
             string text = Json.Write(o);
             if (text.Length > 80000) text = text.Substring(0, 80000) + "…";
             return ToolOutcome.Ok(text);
+        }
+
+        /// <summary>
+        /// Groups road runs that lie within <paramref name="gap"/> tiles of each other into one action
+        /// (up to <paramref name="maxTiles"/> tiles), so a network is a handful of actions, not one per run.
+        /// </summary>
+        private static List<List<Cell>> Clusters(List<List<Cell>> runs, int gap, int maxTiles)
+        {
+            var result = new List<List<Cell>>();
+            var left = runs.OrderByDescending(r => r.Count).ToList();
+            while (left.Count > 0)
+            {
+                var group = new List<Cell>(left[0]);
+                left.RemoveAt(0);
+                bool grew = true;
+                while (grew && group.Count < maxTiles)
+                {
+                    grew = false;
+                    for (int i = 0; i < left.Count && group.Count < maxTiles; i++)
+                    {
+                        var run = left[i];
+                        if (group.Count + run.Count > maxTiles) continue;
+                        bool near = run.Any(a => group.Any(b => Math.Abs(a.X - b.X) <= gap && Math.Abs(a.Z - b.Z) <= gap));
+                        if (!near) continue;
+                        group.AddRange(run);
+                        left.RemoveAt(i--);
+                        grew = true;
+                    }
+                }
+                result.Add(group);
+            }
+            return result;
         }
 
         /// <summary>Splits a tile set into connected runs, each ordered as a walkable path where possible.</summary>

@@ -352,6 +352,60 @@ namespace FrontierArchitect.Core.Claude
     /// <summary>Validation of tool inputs against the subset of JSON Schema used by our tools.</summary>
     public static class ToolValidation
     {
+        /// <summary>
+        /// Repairs common shape slips before validation: JSON sent as a string ("[1,2]" for an
+        /// array, "{...}" for an object), numbers and booleans sent as text. Returns the repaired value.
+        /// </summary>
+        public static object Coerce(JObject schema, object value)
+        {
+            if (schema == null || value == null) return value;
+            string type = schema.Str("type");
+            if ((type == "array" || type == "object") && value is string text)
+            {
+                string t = text.Trim();
+                if ((type == "array" && t.StartsWith("[")) || (type == "object" && t.StartsWith("{")))
+                {
+                    try { value = Json.Parse(t); } catch { return value; }
+                }
+            }
+            switch (type)
+            {
+                case "object":
+                    {
+                        var o = value as JObject;
+                        var props = schema.Obj("properties");
+                        if (o == null || props == null) return value;
+                        foreach (var key in new List<string>(o.Keys))
+                        {
+                            var ps = props.Obj(key);
+                            if (ps != null) o[key] = Coerce(ps, o[key]);
+                        }
+                        return o;
+                    }
+                case "array":
+                    {
+                        var a = value as JArray;
+                        var items = schema.Obj("items");
+                        if (a == null || items == null) return value;
+                        for (int i = 0; i < a.Count; i++) a[i] = Coerce(items, a[i]);
+                        return a;
+                    }
+                case "integer":
+                case "number":
+                    if (value is string ns && double.TryParse(ns.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d))
+                        return type == "integer" && Math.Abs(d - Math.Round(d)) < 1e-9 ? (object)(long)Math.Round(d) : d;
+                    return value;
+                case "boolean":
+                    if (value is string bs)
+                    {
+                        if (string.Equals(bs.Trim(), "true", StringComparison.OrdinalIgnoreCase)) return true;
+                        if (string.Equals(bs.Trim(), "false", StringComparison.OrdinalIgnoreCase)) return false;
+                    }
+                    return value;
+            }
+            return value;
+        }
+
         public static string Validate(JObject schema, object value, string path = "input")
         {
             if (schema == null) return null;

@@ -187,7 +187,12 @@ namespace FrontierArchitect.Core.Planning
 
             // 100% connectivity is required; a village that starts below 95% (roads partly unread, or
             // genuinely disconnected) must at least not get worse, and is told what is missing.
-            if (startConnectivity >= 0.95 && v.FinalConnectivity < 0.999)
+            if (!_s.ConnectivityRequired)
+            {
+                if (v.FinalConnectivity + 0.02 < startConnectivity)
+                    v.Warnings.Add("road connectivity falls from " + Math.Round(startConnectivity * 100) + "% to " + Math.Round(v.FinalConnectivity * 100) + "%");
+            }
+            else if (startConnectivity >= 0.95 && v.FinalConnectivity < 0.999)
                 v.Errors.Add("the final layout must connect 100% of buildings by road (now " + Math.Round(v.FinalConnectivity * 100) + "%); call route_network and add its road_add actions");
             else if (startConnectivity < 0.95)
             {
