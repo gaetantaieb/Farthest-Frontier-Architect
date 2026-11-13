@@ -59,6 +59,8 @@ namespace FrontierArchitect.Core.Claude
         public string RunSystem = "";
         public string UserMessage = "";
         public List<string> Betas = new List<string>();
+        /// <summary>Optional: records every turn and tool call (run log).</summary>
+        public IRunRecorder Recorder;
     }
 
     public sealed class AgentProgress
@@ -114,6 +116,8 @@ namespace FrontierArchitect.Core.Claude
 
             var tools = new JArray();
             foreach (var t in host.Tools) tools.Add(t.ToApi(true));
+            var rec = cfg.Recorder;
+            try { rec?.Start(cfg, host.Tools); } catch { rec = null; }
 
             int modelIndex = 0;
             string model = cfg.ModelCandidates[0];
@@ -148,6 +152,7 @@ namespace FrontierArchitect.Core.Claude
                     betas.Add("server-side-fallback-2026-07-01");
 
                 MessageResult msg;
+                var turnClock = Stopwatch.StartNew();
                 try
                 {
                     msg = _client.Stream(body, betas, (type, ev) => OnStreamEvent(type, ev, progress, onProgress), cancel);
@@ -158,11 +163,13 @@ namespace FrontierArchitect.Core.Claude
                 {
                     // e.g. a model this organisation may not use: fall back to the next candidate.
                     modelIndex++;
+                    Safe(() => rec?.Note(turn, "model_fallback", cfg.ModelCandidates[modelIndex - 1] + " unavailable (" + e.Message + "); trying " + cfg.ModelCandidates[modelIndex]));
                     model = cfg.ModelCandidates[modelIndex];
                     turn = 0;
                     continue;
                 }
                 AddUsage(progress, msg.Usage);
+                Safe(() => rec?.Turn(turn, msg, turnClock.Elapsed.TotalSeconds));
                 result.Model = msg.Model ?? model;
 
                 if (msg.StopReason == "refusal")
@@ -175,6 +182,7 @@ namespace FrontierArchitect.Core.Claude
                 {
                     // Output was cut off (a tool input may be truncated): re-issue the same turn with more room.
                     maxTokens = Math.Min(128000, maxTokens * 2);
+                    Safe(() => rec?.Note(turn, "max_tokens", "output cut off; retrying the turn with max_tokens " + maxTokens));
                     turn--;
                     continue;
                 }
@@ -209,6 +217,7 @@ namespace FrontierArchitect.Core.Claude
                     }
                     repairSent = true;
                     string repair = host.MissingSubmitMessage + (textOutcome != null && textOutcome.IsError ? "\nProblems found: " + textOutcome.Content : "");
+                    Safe(() => rec?.Note(turn, "repair_prompt", repair));
                     messages.Add(new JObject().Set("role", "user").Set("content", new JArray { new JObject().Set("type", "text").Set("text", repair) }));
                     continue;
                 }
@@ -226,6 +235,7 @@ namespace FrontierArchitect.Core.Claude
                     onProgress?.Invoke(progress);
                     ToolOutcome outcome;
                     string raw;
+                    var toolClock = Stopwatch.StartNew();
                     if (msg.StopReason == "max_tokens")
                         outcome = ToolOutcome.Error("your output was cut off at max_tokens before this call finished; send a shorter call");
                     else if (msg.InvalidToolInputs.TryGetValue(id, out raw))
@@ -239,6 +249,8 @@ namespace FrontierArchitect.Core.Claude
                     var tr = new JObject().Set("type", "tool_result").Set("tool_use_id", id).Set("content", outcome.Content ?? "");
                     if (outcome.IsError) tr.Set("is_error", true);
                     results.Add(tr);
+                    var o2 = outcome;
+                    Safe(() => rec?.Tool(turn, name, tu.Obj("input"), o2, toolClock.Elapsed.TotalSeconds));
                     if (outcome.Finished && !outcome.IsError)
                     {
                         finished = true;
@@ -262,7 +274,11 @@ namespace FrontierArchitect.Core.Claude
                            (int)sw.Elapsed.TotalMinutes + "/" + cfg.MaxMinutes + " min). Finish now: phase what you have and submit it.";
                     wrapUpSent = true;
                 }
-                if (!string.IsNullOrEmpty(hint)) results.Add(new JObject().Set("type", "text").Set("text", hint));
+                if (!string.IsNullOrEmpty(hint))
+                {
+                    results.Add(new JObject().Set("type", "text").Set("text", hint));
+                    Safe(() => rec?.Note(turn, "wrap_up_hint", hint));
+                }
                 messages.Add(new JObject().Set("role", "user").Set("content", results));
             }
 
@@ -272,6 +288,8 @@ namespace FrontierArchitect.Core.Claude
             onProgress?.Invoke(progress);
             return result;
         }
+
+        private static void Safe(Action a) { try { a(); } catch { } }
 
         internal static JObject BuildBody(AgentRunConfig cfg, string model, int maxTokens, JArray tools, JArray messages)
         {

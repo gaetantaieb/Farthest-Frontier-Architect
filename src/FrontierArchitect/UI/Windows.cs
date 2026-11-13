@@ -22,6 +22,7 @@ namespace FrontierArchitect.UI
         public static readonly ExecuteWindow Execute = new ExecuteWindow();
         public static readonly SettingsWindow Settings = new SettingsWindow();
         public static readonly AgentWindow Agent = new AgentWindow();
+        public static readonly RunsWindow Runs = new RunsWindow();
 
         public static void ShowReport() { Report.Visible = true; }
         public static void ShowArchitect() { Architect.Visible = true; }
@@ -40,7 +41,7 @@ namespace FrontierArchitect.UI
             MouseOverUi = false;
             if (_reportWasVisible && !Report.Visible) C.ClearUndo(); // Apply can be undone until the panel closes
             _reportWasVisible = Report.Visible;
-            Report.Draw(101); Architect.Draw(102); Execute.Draw(103); Settings.Draw(104); Agent.Draw(105);
+            Report.Draw(101); Architect.Draw(102); Execute.Draw(103); Settings.Draw(104); Agent.Draw(105); Runs.Draw(106);
             GUI.matrix = old;
         }
 
@@ -125,6 +126,7 @@ namespace FrontierArchitect.UI
             GUI.enabled = !C.Busy;
             if (GUILayout.Button(r == null ? "Analyse village" : "Re-run analysis")) { C.ClearUndo(); C.StartAssistant(); }
             GUI.enabled = true;
+            if (GUILayout.Button("Runs", GUILayout.Width(60))) Windows.Runs.Open("assistant");
             GUILayout.EndHorizontal();
             if (r == null) { GUILayout.Label(C.Busy ? "Analysing…" : "No report yet.", Styles.Wrap); return; }
             if (!string.IsNullOrEmpty(r.Summary)) GUILayout.Label(r.Summary, Styles.Wrap);
@@ -187,6 +189,7 @@ namespace FrontierArchitect.UI
             GUILayout.Label("Ambition " + req.Ambition + " — " + Core.Agents.AgentDefinition.AmbitionNames[Mathf.Clamp(req.Ambition, 1, 5)], GUILayout.Width(190));
             req.Ambition = Mathf.RoundToInt(GUILayout.HorizontalSlider(req.Ambition, 1, 5, GUILayout.Width(200)));
             GUILayout.FlexibleSpace();
+            if (GUILayout.Button("Runs", GUILayout.Width(60))) Windows.Runs.Open("architect");
             if (GUILayout.Button("Agent...", GUILayout.Width(80))) Windows.Agent.Visible = !Windows.Agent.Visible;
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
@@ -621,5 +624,109 @@ namespace FrontierArchitect.UI
             v = Mathf.Round(GUILayout.HorizontalSlider(v, min, max, GUILayout.Width(180)) / step) * step;
             GUILayout.EndHorizontal();
         }
+    }
+
+    // ====================================================================== Run logs
+
+    internal sealed class RunsWindow : Window
+    {
+        public RunsWindow() : base(new Rect(80, 70, 820, 680)) { }
+        protected override string Title => "Run logs — what Claude did, turn by turn";
+        private string _filter = "";
+        private List<Core.Claude.RunLogView> _list;
+        private Core.Claude.RunLogView _open;
+        private float _listedAt;
+        private Vector2 _listScroll;
+        private bool _showPrompts;
+
+        public void Open(string agent)
+        {
+            _filter = agent ?? "";
+            _list = null;
+            _open = null;
+            Visible = true;
+        }
+
+        protected override void Body()
+        {
+            if (_list == null || Time.realtimeSinceStartup - _listedAt > 5)
+            {
+                _list = Core.Claude.RunLogView.List(Paths.Runs, 50);
+                _listedAt = Time.realtimeSinceStartup;
+            }
+            GUILayout.BeginHorizontal();
+            foreach (var f in new[] { "", "assistant", "architect" })
+                if (GUILayout.Toggle(_filter == f, f == "" ? "all" : f, GUILayout.ExpandWidth(false))) _filter = f;
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("Open folder")) Application.OpenURL("file:///" + Paths.Runs.Replace('\\', '/'));
+            GUILayout.EndHorizontal();
+            GUILayout.Label(C.Config.RunLogEnabled ? "Every run is logged to UserData/FrontierArchitect/runs/ (newest " + C.Config.RunLogKeep + " kept). Reasoning is the summary the API returns, not the raw chain of thought." : "Run logging is off (config.json: run_log.enabled).", Styles.Small);
+
+            _listScroll = GUILayout.BeginScrollView(_listScroll, GUILayout.Height(150));
+            foreach (var r in _list.Where(x => _filter == "" || x.Agent.StartsWith(_filter)))
+            {
+                string outcome = r.End == null ? "unfinished" : r.End.Bool("success") ? "ok" : "failed: " + Short(r.End.Str("error"), 60);
+                string line = r.When.Replace("T", " ").Substring(0, Math.Min(19, r.When.Length)) + "  " + r.Agent + "  " +
+                              (r.End == null ? "" : r.End.Int("turns") + " turns, " + Math.Round(r.End.Num("seconds")) + " s, " +
+                               (r.End.Obj("usage").Long("output_tokens") / 1000) + "k out tokens  ") + outcome;
+                if (GUILayout.Button(line, _open?.Path == r.Path ? Styles.Bold : GUI.skin.button)) { _open = Core.Claude.RunLogView.Read(r.Path, true); Scroll = Vector2.zero; }
+            }
+            GUILayout.EndScrollView();
+
+            if (_open == null) { GUILayout.Label("Pick a run.", Styles.Small); return; }
+            var s = _open.Start;
+            if (s != null)
+            {
+                var m = s.Obj("meta");
+                GUILayout.Label(s.Str("agent") + " · " + m.Str("settlement") + " · year " + m.Int("year") + " " + m.Str("season") +
+                                " · models " + string.Join(", ", s.Arr("models").Strings().ToArray()) + " · effort " + s.Str("effort") +
+                                " · profile " + m.Str("profile") + " · agent " + m.Str("agent_hash") +
+                                (m.ContainsKey("ambition") ? " · ambition " + m.Int("ambition") + " " + m.Str("mode") : ""), Styles.Small);
+            }
+            _showPrompts = GUILayout.Toggle(_showPrompts, "Show prompts (system and task with the snapshot)");
+            Scroll = GUILayout.BeginScrollView(Scroll, GUILayout.Height(360));
+            if (_showPrompts && s != null)
+            {
+                GUILayout.Label("System (run)", Styles.Bold);
+                GUILayout.Label(Short(s.Str("system_run"), 6000), Styles.Small);
+                GUILayout.Label("Task", Styles.Bold);
+                GUILayout.Label(Short(s.Str("task"), 6000), Styles.Small);
+            }
+            foreach (var e in _open.Events)
+            {
+                switch (e.Str("event"))
+                {
+                    case "turn":
+                        GUILayout.Label("Turn " + e.Int("turn") + " — " + e.Str("model") + ", " + e.Str("stop_reason") + ", " + e.Num("seconds") + " s, " +
+                                        e.Obj("usage").Long("output_tokens") + " out tokens", Styles.Header);
+                        foreach (var b in e.Arr("content").Objects())
+                        {
+                            switch (b.Str("type"))
+                            {
+                                case "thinking":
+                                    if (!string.IsNullOrEmpty(b.Str("summary"))) GUILayout.Label("<i>Reasoning:</i> " + Short(b.Str("summary"), 4000), Styles.Small);
+                                    break;
+                                case "text": GUILayout.Label(Short(b.Str("text"), 4000), Styles.Wrap); break;
+                                case "tool_use": GUILayout.Label("→ <b>" + b.Str("name") + "</b> " + Short(Json.Write(b.Obj("input")), 400), Styles.Small); break;
+                            }
+                        }
+                        break;
+                    case "tool":
+                        GUILayout.Label("   ← " + e.Str("name") + (e.Bool("is_error") ? " <color=#ff7766>error</color>" : "") + " (" + e.Num("ms") + " ms): " +
+                                        Short(e["result"] is string rs ? rs : Json.Write(e["result"]), 600), Styles.Small);
+                        break;
+                    case "note":
+                        GUILayout.Label("[" + e.Str("kind") + "] " + Short(e.Str("text"), 600), Styles.Important);
+                        break;
+                }
+            }
+            var end = _open.End;
+            if (end != null)
+                GUILayout.Label(end.Bool("success") ? "Finished: accepted after " + end.Int("turns") + " turns." : "Stopped: " + end.Str("error"), end.Bool("success") ? Styles.Good : Styles.Bad);
+            else GUILayout.Label("No end line: the run is in progress or was interrupted.", Styles.Important);
+            GUILayout.EndScrollView();
+        }
+
+        private static string Short(string s, int n) => string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s : s.Substring(0, n) + " …");
     }
 }

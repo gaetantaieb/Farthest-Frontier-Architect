@@ -81,6 +81,7 @@ Making the repository public removes this step for you and for anyone you share 
 | `agents/` | the Assistant and Architect agent files (editable in game: Architect → Agent...) |
 | `gamemap.json`, `gamemap.local.json` | how the mod reaches the game's internals; your own test results |
 | `plans/`, `reports/` | saved scenarios (survive a reload) and reports |
+| `runs/` | one log per Assistant/Architect run: prompts, Claude's reasoning summary per turn, every tool call and the mod's answer, the outcome (open with the **Runs** button) |
 | `probe/` | output of Settings → Diagnostics → Run probe |
 | `updates/status.json` | what the updater did on the last launch |
 

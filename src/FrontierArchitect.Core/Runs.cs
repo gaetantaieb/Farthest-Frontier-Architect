@@ -24,6 +24,8 @@ namespace FrontierArchitect.Core
         /// <summary>Why an op cannot run in this game version (null = available).</summary>
         public Func<string, string> OpUnavailable = _ => null;
         public string ModVersion = "";
+        /// <summary>Creates a run log for (agent, settlement, meta); null = no logging.</summary>
+        public Func<string, string, JObject, IRunRecorder> NewRecorder;
     }
 
     public sealed class ArchitectRequest
@@ -53,6 +55,30 @@ namespace FrontierArchitect.Core
     /// <summary>Builds prompts from the agent files and runs the Assistant / Architect agents.</summary>
     public static class Runs
     {
+        /// <summary>Runs the loop with an optional run log; the log's end line carries the outcome.</summary>
+        private static AgentResult RunLogged(RunContext ctx, string agentName, VillageSnapshot snap, JObject meta, AgentRunConfig cfg,
+            IToolHost host, Action<AgentProgress> progress, CancellationToken cancel, Func<AgentResult, object> payloadJson)
+        {
+            IRunRecorder rec = null;
+            try { rec = ctx.NewRecorder?.Invoke(agentName, snap.Meta.SettlementName, meta); } catch { }
+            cfg.Recorder = rec;
+            AgentResult res;
+            try { res = new AgentLoop(ctx.Client).Run(cfg, host, progress, cancel); }
+            catch (Exception e)
+            {
+                try { rec?.End(null, null, e.Message); } catch { }
+                throw;
+            }
+            try { rec?.End(res, res.Success ? payloadJson(res) : null, res.Error); } catch { }
+            return res;
+        }
+
+        private static JObject Meta(LoadedAgent agent, VillageSnapshot snap, RunContext ctx) => new JObject()
+            .Set("mod_version", ctx.ModVersion).Set("game_version", snap.Meta.GameVersion)
+            .Set("settlement", snap.Meta.SettlementName).Set("year", snap.Meta.Year).Set("season", snap.Meta.Season)
+            .Set("profile", agent.Profile).Set("agent_hash", agent.Hash).Set("agent_version", agent.Definition.Version)
+            .Set("data_gaps", snap.Gaps.ToJArray());
+
         public static AgentRunConfig BaseConfig(LoadedAgent agent, RunContext ctx, string staticSystem, string runSystem, string user)
         {
             var d = agent.Definition;
@@ -95,7 +121,7 @@ namespace FrontierArchitect.Core
             vars["player_note"] = "";
             var host = new AssistantToolHost(snap, ctx.OpUnavailable, agent.Definition.ToolDescriptions);
             var cfg = BaseConfig(agent, ctx, StaticContext(agent, snap), Template.Render(agent.SystemTemplate, vars), Template.Render(agent.TaskTemplate, vars));
-            var res = new AgentLoop(ctx.Client).Run(cfg, host, progress, cancel);
+            var res = RunLogged(ctx, "assistant", snap, Meta(agent, snap, ctx), cfg, host, progress, cancel, r => ((AssistantReport)r.Payload).ToJson());
             var outcome = new AssistantOutcome { Agent = res };
             if (!res.Success) { outcome.Error = res.Error; return outcome; }
             outcome.Report = (AssistantReport)res.Payload;
@@ -143,7 +169,9 @@ namespace FrontierArchitect.Core
             var host = new ArchitectToolHost(snap, s, d.EnabledTools.Count > 0 ? d.EnabledTools : null, d.ToolDescriptions,
                 ctx.FoodMonths, ctx.FirewoodMonths, d.StopIfGainBelow, d.GainWindowTurns);
             var cfg = BaseConfig(agent, ctx, StaticContext(agent, snap), Template.Render(agent.SystemTemplate, vars), Template.Render(agent.TaskTemplate, vars));
-            var res = new AgentLoop(ctx.Client).Run(cfg, host, progress, cancel);
+            var meta = Meta(agent, snap, ctx).Set("ambition", req.Ambition).Set("mode", req.Mode)
+                .Set("locked", req.Locked.ToJArray()).Set("player_note", req.PlayerNote).Set("seed_request", req.SeedRequest);
+            var res = RunLogged(ctx, "architect", snap, meta, cfg, host, progress, cancel, r => PlanJson(r));
             var outcome = new ArchitectOutcome { Agent = res };
             if (!res.Success) { outcome.Error = res.Error; return outcome; }
             var kv = (KeyValuePair<ArchitectPlan, PlanValidation>)res.Payload;
@@ -151,6 +179,12 @@ namespace FrontierArchitect.Core
             outcome.Validation = kv.Value;
             Stamp(outcome.Plan, agent, snap, req, res.Model, ctx);
             return outcome;
+        }
+
+        private static object PlanJson(AgentResult r)
+        {
+            var kv = (KeyValuePair<ArchitectPlan, PlanValidation>)r.Payload;
+            return new JObject().Set("plan", kv.Key.ToJson()).Set("validation", kv.Value.ToJson());
         }
 
         public static void Stamp(ArchitectPlan plan, LoadedAgent agent, VillageSnapshot snap, ArchitectRequest req, string model, RunContext ctx)
@@ -208,7 +242,8 @@ namespace FrontierArchitect.Core
                 ctx.FoodMonths, ctx.FirewoodMonths, d.StopIfGainBelow, d.GainWindowTurns);
             var cfg = BaseConfig(agent, ctx, StaticContext(agent, liveSnap), Template.Render(agent.SystemTemplate, vars), user);
             cfg.MaxTurns = Math.Min(cfg.MaxTurns, 40);
-            var res = new AgentLoop(ctx.Client).Run(cfg, host, progress, cancel);
+            var meta = Meta(agent, liveSnap, ctx).Set("repair_from_phase", fromIndex + 1).Set("problems", problems.ToJArray());
+            var res = RunLogged(ctx, "architect-repair", liveSnap, meta, cfg, host, progress, cancel, r => PlanJson(r));
             var outcome = new ArchitectOutcome { Agent = res };
             if (!res.Success) { outcome.Error = res.Error; return outcome; }
             var kv = (KeyValuePair<ArchitectPlan, PlanValidation>)res.Payload;

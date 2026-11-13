@@ -204,7 +204,12 @@ namespace FrontierArchitect.Tests
                     })
                 });
             http.EnqueueSse(Sse.ToolUse("toolu_2", "submit_plan", plan));
-            var ctx = new RunContext { Client = new ClaudeClient(http, new ClaudeOptions { ApiKey = "k" }, (t, c) => { }) };
+            string logDir = Temp.Dir();
+            var ctx = new RunContext
+            {
+                Client = new ClaudeClient(http, new ClaudeOptions { ApiKey = "sk-secret-key" }, (t, c) => { }),
+                NewRecorder = (a, s, m) => new RunLog(logDir, a, s, m)
+            };
             var req = new ArchitectRequest { Ambition = 1, Mode = "instant", PlayerNote = "prioritise brick production" };
             var outcome = Runs.Architect(agent, Village.Build(), req, ctx, null, CancellationToken.None);
 
@@ -222,6 +227,19 @@ namespace FrontierArchitect.Tests
             Assert.Contains("\"buildings\"", user);
             Assert.Contains("Game knowledge pack", body.Arr("system").Objects().First().Str("text")); // cached block first
             Assert.Equal(14, body.Arr("tools").Count);
+
+            // run log: start, 2 turns with reasoning summaries, 2 tool results, end with the plan; no API key
+            var logFile = System.IO.Directory.GetFiles(logDir, "*.jsonl").Single();
+            Assert.DoesNotContain("sk-secret-key", System.IO.File.ReadAllText(logFile));
+            var view = RunLogView.Read(logFile, true);
+            Assert.Equal("architect", view.Agent);
+            Assert.Equal(1, view.Start.Obj("meta").Int("ambition"));
+            Assert.Contains("prioritise brick production", view.Start.Str("task"));
+            Assert.Equal(2, view.Events.Count(e => e.Str("event") == "turn"));
+            Assert.Equal("I should look.", view.Events.First(e => e.Str("event") == "turn").Arr("content").Objects().First().Str("summary"));
+            Assert.Equal(new[] { "score_draft", "submit_plan" }, view.Events.Where(e => e.Str("event") == "tool").Select(e => e.Str("name")).ToArray());
+            Assert.True(view.End.Bool("success"));
+            Assert.NotNull(view.End.Obj("payload").Obj("plan"));
         }
     }
 }

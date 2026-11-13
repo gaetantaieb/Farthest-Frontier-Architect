@@ -18,6 +18,7 @@ namespace FrontierArchitect
         public static string Plans => Path.Combine(Root, "plans");
         public static string Reports => Path.Combine(Root, "reports");
         public static string Probe => Path.Combine(Root, "probe");
+        public static string Runs => Path.Combine(Root, "runs");
         public static string Logs => Path.Combine(Root, "logs");
         public static string Config => Path.Combine(Root, "config.json");
         public static string UpdaterConfig => Path.Combine(Root, "updater.json");
@@ -27,7 +28,7 @@ namespace FrontierArchitect
 
         public static void Ensure()
         {
-            foreach (var d in new[] { Root, Agents, Plans, Reports, Probe, Logs }) Directory.CreateDirectory(d);
+            foreach (var d in new[] { Root, Agents, Plans, Reports, Probe, Logs, Runs }) Directory.CreateDirectory(d);
         }
     }
 
@@ -57,6 +58,8 @@ namespace FrontierArchitect
         public string DefaultMode = "native";
         public string ToggleHudKey = "F8", ToggleOverlayKey = "F9", LockKey = "L";
         public float UiScale = 1f;
+        public bool RunLogEnabled = true;
+        public int RunLogKeep = 50;
 
         public static ModConfig Load()
         {
@@ -88,6 +91,9 @@ namespace FrontierArchitect
                     c.ToggleOverlayKey = k.Str("toggle_overlay", "F9");
                     c.LockKey = k.Str("lock_under_cursor", "L");
                     c.UiScale = (float)Math.Max(0.6, Math.Min(2.5, o.Num("ui_scale", 1)));
+                    var rl = o.Obj("run_log");
+                    c.RunLogEnabled = rl.Bool("enabled", true);
+                    c.RunLogKeep = Math.Max(1, rl.Int("keep", 50));
                     return c;
                 }
             }
@@ -112,6 +118,7 @@ namespace FrontierArchitect
                 .Set("default_mode", DefaultMode)
                 .Set("hotkeys", new JObject().Set("toggle_hud", ToggleHudKey).Set("toggle_overlay", ToggleOverlayKey).Set("lock_under_cursor", LockKey))
                 .Set("ui_scale", UiScale)
+                .Set("run_log", new JObject().Set("enabled", RunLogEnabled).Set("keep", RunLogKeep))
                 .Set("_help", "anthropic_api_key: your own key from console.anthropic.com (stays on this computer). model: empty = the agent file's choice (most capable available).");
             Directory.CreateDirectory(Paths.Root);
             File.WriteAllText(Paths.Config, Json.Write(o, true));

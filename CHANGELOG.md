@@ -3,6 +3,15 @@
 Every version listed here is published by the release workflow (`.github/workflows/release.yml`) when it reaches `main`.
 The in-game updater shows the section of the version it installs.
 
+## [0.1.3] - 2026-11-13
+
+- Run logs: every Assistant and Architect run (and phase repair) is written to `UserData/FrontierArchitect/runs/` as one
+  JSON-lines file: run settings, the prompts sent (system and task with the snapshot), per turn Claude's reasoning
+  summary, text and tool calls, every tool result, notes (model fallback, repair prompts, wrap-up hints), and the outcome
+  with the plan or report and token usage. The API key is never written.
+- New **Runs** button in the Assistant and Architect panels to browse the logs turn by turn.
+- `config.json → run_log`: `enabled` (default true) and `keep` (newest 50 kept).
+
 ## [0.1.2] - 2026-11-13
 
 - Map reading no longer needs Unity's Terrain component: when the game has none, the mod finds the ground collider and

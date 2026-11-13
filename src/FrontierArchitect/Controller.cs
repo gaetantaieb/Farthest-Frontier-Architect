@@ -150,7 +150,19 @@ namespace FrontierArchitect
             FirewoodMonths = Config.FirewoodMonths,
             OpUnavailable = op => Executor.OpUnavailableReason(op, ExecMode.Instant),
             ModVersion = BuildInfo.Version,
+            NewRecorder = Config.RunLogEnabled ? (Func<string, string, JObject, IRunRecorder>)NewRunLog : null,
         };
+
+        private IRunRecorder NewRunLog(string agent, string settlement, JObject meta)
+        {
+            RunLog.Prune(Paths.Runs, Config.RunLogKeep - 1);
+            var log = new RunLog(Paths.Runs, agent, settlement, meta);
+            LastRunLog = log.PathOnDisk;
+            return log;
+        }
+
+        /// <summary>Path of the most recent run log (for the panels' "View run" buttons).</summary>
+        public volatile string LastRunLog;
 
         public bool CanRun(out string why)
         {
