@@ -16,6 +16,7 @@ namespace FrontierArchitect.UI
     {
         public static Controller C;
         public static bool HudVisible = true;
+        public static bool InGame;
         public static readonly ReportWindow Report = new ReportWindow();
         public static readonly ArchitectWindow Architect = new ArchitectWindow();
         public static readonly ExecuteWindow Execute = new ExecuteWindow();
@@ -46,7 +47,7 @@ namespace FrontierArchitect.UI
         private static void Hud()
         {
             float w = 440;
-            var area = new Rect(Screen.width / C.Config.UiScale - w - 10, 8, w, 120);
+            var area = new Rect(Screen.width / C.Config.UiScale - w - 10, 60, w, 140);
             GUILayout.BeginArea(area);
             GUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
@@ -61,6 +62,8 @@ namespace FrontierArchitect.UI
             if (GUILayout.Button("Execute" + (C.Runner.Running ? " (running)" : ""), Styles.Button)) Execute.Visible = !Execute.Visible;
             if (GUILayout.Button("Settings", Styles.Button)) Settings.Visible = !Settings.Visible;
             GUILayout.EndHorizontal();
+            if (!InGame)
+                GUILayout.Label("Frontier Architect v" + BuildInfo.Version + ": load a settlement to use the buttons.", Styles.Box);
             if (C.Busy)
             {
                 GUILayout.BeginHorizontal(GUI.skin.box);
