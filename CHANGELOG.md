@@ -3,6 +3,14 @@
 Every version listed here is published by the release workflow (`.github/workflows/release.yml`) when it reaches `main`.
 The in-game updater shows the section of the version it installs.
 
+## [0.1.2] - 2026-11-13
+
+- Map reading no longer needs Unity's Terrain component: when the game has none, the mod finds the ground collider and
+  raycasts onto it (height, slope, water), or falls back to the extent of the village. Fixes Architect failing with
+  "no active terrain; grid is empty".
+- Architect stops before calling Claude when no map could be read, and says why.
+- The probe report now describes the ground (source, largest colliders, TerrainManager fields).
+
 ## [0.1.1] - 2026-11-13
 
 - Buttons are always drawn (top right, below the game's own bar); a status line shows until a settlement is detected.

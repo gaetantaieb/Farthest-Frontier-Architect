@@ -6,7 +6,7 @@
     up on its next game launch (see docs/UPDATES.md).
   -->
   <PropertyGroup>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <FaRepository>gaetantaieb/Farthest-Frontier-Architect</FaRepository>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>

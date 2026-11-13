@@ -138,13 +138,15 @@ namespace FrontierArchitect.Game
         // ---------------------------------------------------------------- grid
 
         private TileGrid _terrainCache;
-        private int _terrainCacheId;
+        private string _terrainCacheKey;
 
-        /// <summary>Terrain-derived layers are cached (the terrain only changes when something is flattened).</summary>
+        /// <summary>Terrain-derived layers are cached (the ground only changes when something is flattened).</summary>
         private TileGrid BuildGrid()
         {
-            var t = Terrain.activeTerrain;
-            if (t != null && _terrainCache != null && _terrainCacheId == t.GetInstanceID())
+            Bounds mb;
+            bool have = Ground.MapBounds(_g.Map, _g, out mb);
+            string key = Ground.Source + "|" + mb.min + "|" + mb.max;
+            if (have && _terrainCache != null && _terrainCacheKey == key)
             {
                 var c = _terrainCache;
                 var g = new TileGrid(c.Width, c.Height) { TileSize = c.TileSize, OriginX = c.OriginX, OriginZ = c.OriginZ };
@@ -159,41 +161,46 @@ namespace FrontierArchitect.Game
                 return g;
             }
             var built = BuildGridFresh();
-            if (t != null) { _terrainCache = built; _terrainCacheId = t.GetInstanceID(); }
+            if (built.Width > 1) { _terrainCache = built; _terrainCacheKey = key; }
             return built;
         }
 
-        public void InvalidateTerrain() { _terrainCache = null; }
+        public void InvalidateTerrain() { _terrainCache = null; Ground.Reset(); }
 
         private TileGrid BuildGridFresh()
         {
-            var terrain = Terrain.activeTerrain;
-            if (terrain == null)
+            Bounds mb;
+            if (!Ground.MapBounds(_g.Map, _g, out mb))
             {
-                _g.Gaps.Add("no active terrain; grid is empty");
+                _g.Gaps.Add("map extent not found (no terrain, no ground collider, no buildings); grid is empty");
                 return new TileGrid(1, 1);
             }
-            var data = terrain.terrainData;
-            var size = data.size;
             float tile = Math.Max(0.25f, _g.Map.TileSize);
-            int w = Mathf.CeilToInt(size.x / tile), h = Mathf.CeilToInt(size.z / tile);
-            while (w > _g.Map.MaxGrid || h > _g.Map.MaxGrid) { tile *= 2; w = Mathf.CeilToInt(size.x / tile); h = Mathf.CeilToInt(size.z / tile); }
-            var grid = new TileGrid(w, h) { TileSize = tile, OriginX = terrain.transform.position.x, OriginZ = terrain.transform.position.z };
-            float baseY = terrain.transform.position.y;
-            float water = float.IsNaN(_g.Map.WaterHeight) ? float.NegativeInfinity : _g.Map.WaterHeight;
+            int w = Mathf.CeilToInt(mb.size.x / tile), h = Mathf.CeilToInt(mb.size.z / tile);
+            while (w > _g.Map.MaxGrid || h > _g.Map.MaxGrid) { tile *= 2; w = Mathf.CeilToInt(mb.size.x / tile); h = Mathf.CeilToInt(mb.size.z / tile); }
+            var grid = new TileGrid(w, h) { TileSize = tile, OriginX = mb.min.x, OriginZ = mb.min.z };
             var fert = FertilitySampler();
+            int misses = 0;
             for (int z = 0; z < h; z++)
                 for (int x = 0; x < w; x++)
                 {
-                    float nx = (x + 0.5f) / w, nz = (z + 0.5f) / h;
                     int i = grid.Idx(x, z);
-                    float height = data.GetInterpolatedHeight(nx, nz) + baseY;
-                    grid.Elevation[i] = height;
-                    grid.Slope[i] = data.GetSteepness(nx, nz);
+                    float wx = grid.OriginX + (x + 0.5f) * tile, wz = grid.OriginZ + (z + 0.5f) * tile;
+                    float height; Vector3 normal; bool water;
                     bool edge = x == 0 || z == 0 || x == w - 1 || z == h - 1;
-                    grid.Terrain[i] = edge ? Core.Model.Terrain.Edge : height < water ? Core.Model.Terrain.Water : grid.Slope[i] > 45 ? Core.Model.Terrain.Cliff : Core.Model.Terrain.Land;
-                    if (fert != null) grid.Fertility[i] = fert(nx, nz);
+                    if (!Ground.Probe(wx, wz, _g.Map.WaterHeight, out height, out normal, out water))
+                    {
+                        misses++;
+                        grid.Terrain[i] = Core.Model.Terrain.Edge;
+                        continue;
+                    }
+                    grid.Elevation[i] = height;
+                    grid.Slope[i] = Vector3.Angle(normal, Vector3.up);
+                    grid.Terrain[i] = edge ? Core.Model.Terrain.Edge : water ? Core.Model.Terrain.Water : grid.Slope[i] > 45 ? Core.Model.Terrain.Cliff : Core.Model.Terrain.Land;
+                    if (fert != null) grid.Fertility[i] = fert((x + 0.5f) / w, (z + 0.5f) / h);
                 }
+            if (misses > w * h / 2) _g.Gaps.Add("ground not found under " + misses + " of " + (w * h) + " tiles (source " + Ground.Source + ")");
+            Log.Info("Map grid " + w + "x" + h + " tiles of " + tile + " units from " + Ground.Source + (misses > 0 ? ", " + misses + " tiles without ground" : ""));
             return grid;
         }
 

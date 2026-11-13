@@ -165,13 +165,7 @@ namespace FrontierArchitect.Game
 
             var distinct = buildings.Select(b => g.BuildingType(b)).GroupBy(x => x).OrderBy(x => x.Key).Select(x => (object)(x.Key + " x" + x.Count()));
             o.Set("building_types_in_village", new JArray(distinct));
-            var terrain = UnityEngine.Terrain.activeTerrain;
-            if (terrain != null)
-            {
-                var d = terrain.terrainData;
-                o.Set("terrain", new JObject().Set("size", d.size.ToString()).Set("position", terrain.transform.position.ToString())
-                    .Set("heightmap_resolution", d.heightmapResolution));
-            }
+            o.Set("ground", Ground.Describe(map, g));
             var ops = new JObject();
             var exec = new GameExecutor(g, null);
             foreach (var op in Core.Planning.Ops.All)

@@ -113,9 +113,7 @@ namespace FrontierArchitect.UI
         private static Vector3 W(TileGrid g, float cx, float cz, float lift)
         {
             float x = g.OriginX + cx * g.TileSize, z = g.OriginZ + cz * g.TileSize;
-            var t = Terrain.activeTerrain;
-            float y = t != null ? t.SampleHeight(new Vector3(x, 0, z)) + t.transform.position.y : 0;
-            return new Vector3(x, y + lift, z);
+            return new Vector3(x, Game.Ground.Height(x, z) + lift, z);
         }
 
         private static void Seg(Vector3 a, Vector3 b, Color c) { GL.Color(c); GL.Vertex(a); GL.Vertex(b); }

@@ -61,8 +61,9 @@ namespace FrontierArchitect.Game
         private TileGrid G()
         {
             if (Grid != null) return Grid;
-            var t = UnityEngine.Terrain.activeTerrain;
-            Grid = new TileGrid(1, 1) { TileSize = Map.TileSize, OriginX = t != null ? t.transform.position.x : 0, OriginZ = t != null ? t.transform.position.z : 0 };
+            Bounds mb;
+            Ground.MapBounds(Map, _g, out mb);
+            Grid = new TileGrid(1, 1) { TileSize = Map.TileSize, OriginX = mb.min.x, OriginZ = mb.min.z };
             return Grid;
         }
 
@@ -110,9 +111,7 @@ namespace FrontierArchitect.Game
         {
             float x, z;
             G().CellCenterWorld(c, out x, out z);
-            var t = UnityEngine.Terrain.activeTerrain;
-            float y = t != null ? t.SampleHeight(new Vector3(x, 0, z)) + t.transform.position.y : 0;
-            return new Vector3(x, y, z);
+            return new Vector3(x, Ground.Height(x, z), z);
         }
 
         private Vector3 FootprintCentre(PlanAction a, int w, int h)
@@ -122,9 +121,7 @@ namespace FrontierArchitect.Game
             float fw = (swap ? h : w) * grid.TileSize, fh = (swap ? w : h) * grid.TileSize;
             float x = grid.OriginX + a.X * grid.TileSize + fw / 2f;
             float z = grid.OriginZ + a.Z * grid.TileSize + fh / 2f;
-            var t = UnityEngine.Terrain.activeTerrain;
-            float y = t != null ? t.SampleHeight(new Vector3(x, 0, z)) + t.transform.position.y : 0;
-            return new Vector3(x, y, z);
+            return new Vector3(x, Ground.Height(x, z), z);
         }
 
         private Dictionary<string, object> Vars(PlanAction a, out string error)

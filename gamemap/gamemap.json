@@ -6,7 +6,9 @@
   "grid": {
     "tile_size": 1.0,
     "max_cells_per_side": 512,
-    "water_height": null
+    "water_height": null,
+    "_ground_help": "Map source: Unity Terrain if present, else the largest solid collider (set ground_name to part of its name to force one; see probe report.json > ground), else the extent of the village.",
+    "ground_name": ""
   },
   "types": {
     "GameManager": ["GameManager"],

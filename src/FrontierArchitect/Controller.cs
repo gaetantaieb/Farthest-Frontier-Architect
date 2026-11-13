@@ -108,6 +108,7 @@ namespace FrontierArchitect
         public void OnGameSceneReady()
         {
             Access.ResetCache();
+            Snapshots.InvalidateTerrain();
             try
             {
                 LastSnapshot = Snapshots.Build();
@@ -235,6 +236,12 @@ namespace FrontierArchitect
             req.Locked = Locked.ToList();
             LastRequest = req;
             var snap = FreshSnapshot();
+            if (snap.Grid == null || snap.Grid.Width < 16 || snap.Grid.Height < 16)
+            {
+                Toast("Architect needs the map but none could be read (" + string.Join("; ", snap.Gaps.Take(3).ToArray()) +
+                      "). Run Settings > Diagnostics > Run probe and send the probe folder.", 15);
+                return;
+            }
             var ctx = Context();
             Background("Architect", token =>
             {
